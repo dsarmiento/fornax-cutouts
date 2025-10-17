@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from typing import Any
+
+from redis import ResponseError
+from redis.asyncio import Redis as RedisClient
+from redis.asyncio import RedisCluster
+from redis.commands.search.field import NumericField, TextField
+from redis.commands.search.index_definition import IndexDefinition, IndexType
+from redis.commands.search.query import Query
+from vo_models.uws.models import ExecutionPhase, Jobs, ShortJobDescription
+
+from mast.cutouts.constants import REDIS_HOST, REDIS_IS_CLUSTER, REDIS_PORT, REDIS_USE_SSL
+from mast.cutouts.models.cutouts import CutoutJobSummary
+
+JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
+CUTOUT_INDEX_NAME = "cutoutIdx"
+CUTOUT_PREFIX = "cutout"
+CUTOUT_JOB_PREFIX = f"{CUTOUT_PREFIX}:jobs"
+
+CACHE_SEARCH_EN = False
+
+
+def uws_redis_client():
+    return UWSRedis()
+
+
+class UWSRedis:
+    def __init__(self):
+        redis_kwargs = {
+            "host": REDIS_HOST,
+            "port": REDIS_PORT,
+            "ssl": REDIS_USE_SSL,
+        }
+
+        if REDIS_IS_CLUSTER:
+            r = RedisCluster(**redis_kwargs)
+        else:
+            r = RedisClient(**redis_kwargs)
+
+        self.__redis_client = r
+
+    async def _setup_index(self):
+        if not CACHE_SEARCH_EN:
+            return
+
+        try:
+            print("Setting up redis indexes")
+            await self.__redis_client.ft(CUTOUT_INDEX_NAME).create_index(
+                fields=[
+                    TextField("$.phase", as_name="phase"),
+                    NumericField("$.creation_time", as_name="creation_time"),
+                ],
+                definition=IndexDefinition(
+                    prefix=[CUTOUT_JOB_PREFIX],
+                    index_type=IndexType.JSON,
+                ),
+            )
+
+        except ResponseError as e:
+            if "Index already exists" not in str(e):
+                raise e
+
+    async def close(self):
+        await self.__redis_client.close()
+
+    async def ping(self):
+        await self.__redis_client.ping()
+
+    async def __update_job(self, job_id: str, obj: Any, path: str = "$"):
+        await self.__redis_client.json().set(
+            name=f"{CUTOUT_JOB_PREFIX}:{job_id}",
+            path=path,
+            obj=obj,
+        )
+
+    async def __set_time(
+        self,
+        job_id: str,
+        time_field: str,
+        time: datetime = datetime.now(),
+    ):
+        """
+        Using the linux timestamp to save the time into redis for efficient redis querying when filtering on dates
+
+        Args:
+            job_id (str): Job ID to set the time for
+            time_field (str): Timestamp field to set
+            time (datetime, optional): Time object to set. Defaults to datetime.now().
+        """
+        await self.__update_job(
+            job_id=job_id,
+            path=f"$.{time_field}",
+            obj=time.timestamp(),
+        )
+
+    async def create_job(self, job: CutoutJobSummary) -> CutoutJobSummary:
+        job_id = job.job_id
+
+        await self.__redis_client.json().set(
+            name=f"{CUTOUT_JOB_PREFIX}:{job_id}",
+            path="$",
+            obj=job.model_dump(),
+        )
+        await self.set_create_time(job_id)
+
+        return await self.get_job(job_id)
+
+    async def get_job(self, job_id: str) -> CutoutJobSummary:
+        job_json = await self.__redis_client.json().get(f"{CUTOUT_JOB_PREFIX}:{job_id}")
+        return CutoutJobSummary(**job_json)
+
+    async def get_jobs(
+        self,
+        phase: ExecutionPhase | None = None,
+        after: datetime | None = None,
+        last: int = 100,
+    ) -> Jobs:
+        jobref = []
+
+        if CACHE_SEARCH_EN:
+            query_str = ""
+
+            if phase:
+                query_str += f'@phase:"{phase}" '
+
+            if phase != ExecutionPhase.ARCHIVED:
+                query_str += f'-@phase:"{ExecutionPhase.ARCHIVED}" '
+
+            if after:
+                query_str += f"@creation_time:[{after.timestamp()} +inf]"
+
+            query = Query(query_str).sort_by("creation_time", asc=False).paging(0, last)
+
+            results = await self.__redis_client.ft(CUTOUT_INDEX_NAME).search(query)
+
+            for doc in results.docs:
+                job_obj = json.loads(doc.json)
+                job_obj["href"] = f"/cutouts/{job_obj['job_id']}"
+                jobref.append(ShortJobDescription(**job_obj))
+
+        else:
+            pass
+
+        jobs = Jobs(jobref=jobref)
+        return jobs
+
+    async def update_job_phase(self, job_id: str, new_phase: ExecutionPhase):
+        await self.__update_job(
+            job_id=job_id,
+            path="$.phase",
+            obj=new_phase,
+        )
+
+    async def append_job_result(self, job_id: str, result: Any):
+        await self.__redis_client.json().arrappend(
+            f"{CUTOUT_JOB_PREFIX}:{job_id}",
+            "$.results.results",
+            result,
+        )
+
+    async def set_quote(self, job_id: str, quote: datetime):
+        await self.__set_time(job_id=job_id, time_field="quote", time=quote)
+
+    async def set_create_time(self, job_id: str):
+        await self.__set_time(
+            job_id=job_id,
+            time_field="creation_time",
+        )
+
+    async def set_start_time(self, job_id: str):
+        await self.__set_time(
+            job_id=job_id,
+            time_field="start_time",
+        )
+
+    async def set_end_time(self, job_id: str):
+        await self.__set_time(
+            job_id=job_id,
+            time_field="end_time",
+        )
+
+    async def set_destruction(self, job_id: str, destruction: datetime):
+        await self.__set_time(job_id=job_id, time_field="destruction", time=destruction)
