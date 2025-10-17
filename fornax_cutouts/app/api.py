@@ -6,10 +6,8 @@ from typing import Annotated
 from fastapi import Depends, FastAPI
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from mast.cutouts.services.rest_api.routes.metadata import metadata_router
-from mast.cutouts.services.rest_api.routes.sync import sync_router
-from mast.cutouts.services.rest_api.routes.uws import uws_router
-from mast.cutouts.uws_redis import UWSRedis, uws_redis_client
+from fornax_cutouts.routes.v0 import app_v0
+from fornax_cutouts.utils.uws_redis import UWSRedis, uws_redis_client
 
 
 @asynccontextmanager
@@ -24,11 +22,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-
-app_v0 = FastAPI()
-app_v0.include_router(metadata_router)
-app_v0.include_router(uws_router)
-app_v0.include_router(sync_router)
 
 main_app = FastAPI(lifespan=lifespan)
 main_app.mount(path="/api/v0", app=app_v0)

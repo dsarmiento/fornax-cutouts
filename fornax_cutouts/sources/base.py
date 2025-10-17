@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 
 
-class MissionMeta(BaseModel):
+class MissionMetadata(BaseModel):
     name: str
     pixel_size: float
     max_cutout_size: int
@@ -14,11 +14,11 @@ class MissionMeta(BaseModel):
         extra = "allow"
 
 
-class AbstractFilenameResolver(ABC):
-    metadata: MissionMeta
+class AbstractMissionSource(ABC):
+    metadata: MissionMetadata
 
     def __repr__(self):
-        return f"FilenameResolver(mission={self.metadata.name})"
+        return f"MissionSource(mission={self.metadata.name})"
 
     def validate_request(self, size: int, **extras):
         filter = extras.get("filter", [])

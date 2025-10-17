@@ -3,9 +3,9 @@ from typing import Annotated
 from fastapi import APIRouter, Body
 from fastapi_utils.cbv import cbv
 
-from mast.cutouts.filename_resolver.missions import MISSION_LOOKUP, MISSION_METADATA
-from mast.cutouts.filename_resolver.models import FilenameRequest
-from mast.cutouts.santa import resolve_positions
+from fornax_cutouts.models.metadata import FilenameRequest
+from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 metadata_router = APIRouter()
 
@@ -14,14 +14,14 @@ metadata_router = APIRouter()
 class MetadataHandler:
     @metadata_router.get("/missions")
     def get_missions(self):
-        return MISSION_METADATA
+        return cutout_registry.get_mission_metadata()
 
     @metadata_router.get("/missions/{mission}")
     def get_mission(
         self,
         mission: str,
     ):
-        return MISSION_METADATA[mission]
+        return cutout_registry[mission]
 
     @metadata_router.post("/filenames")
     def get_filenames(
@@ -41,7 +41,7 @@ class MetadataHandler:
             request_dict = fname_request.model_dump()
             request_dict["position"] = resolved_positions
             request_dict = {k: v for k, v in request_dict.items() if v is not None}
-            mission_result[mission_name] = MISSION_LOOKUP[mission_name].get_filenames(**request_dict)
+            mission_result[mission_name] = cutout_registry[mission_name].get_filenames(**request_dict)
 
         # TODO: Build a pydantic model of the return
         return {
@@ -65,7 +65,7 @@ class MetadataHandler:
         request_dict["position"] = resolve_positions(fname_request.position)
         request_dict = {k: v for k, v in request_dict.items() if v is not None}
 
-        fnames = MISSION_LOOKUP[mission].get_filenames(**request_dict)
+        fnames = cutout_registry[mission].get_filenames(**request_dict)
 
         return {
             "request": fname_request,

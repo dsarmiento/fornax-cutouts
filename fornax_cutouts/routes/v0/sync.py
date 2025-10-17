@@ -6,10 +6,10 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi_utils.cbv import cbv
 
-from mast.cutouts.celery_tasks import generate_cutout
-from mast.cutouts.constants import SYNC_TTL
-from mast.cutouts.models.base import TargetPosition
-from mast.cutouts.models.cutouts import CutoutResponse
+from fornax_cutouts.constants import SYNC_TTL
+from fornax_cutouts.models.base import TargetPosition
+from fornax_cutouts.models.cutouts import CutoutResponse
+from fornax_cutouts.tasks import generate_cutout
 
 sync_router = APIRouter(prefix="/cutouts/sync")
 

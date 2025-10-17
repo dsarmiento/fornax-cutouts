@@ -12,8 +12,8 @@ from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 from vo_models.uws.models import ExecutionPhase, Jobs, ShortJobDescription
 
-from mast.cutouts.constants import REDIS_HOST, REDIS_IS_CLUSTER, REDIS_PORT, REDIS_USE_SSL
-from mast.cutouts.models.cutouts import CutoutJobSummary
+from fornax_cutouts.constants import REDIS_HOST, REDIS_IS_CLUSTER, REDIS_PORT, REDIS_USE_SSL
+from fornax_cutouts.models.cutouts import CutoutJobSummary
 
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
 CUTOUT_INDEX_NAME = "cutoutIdx"

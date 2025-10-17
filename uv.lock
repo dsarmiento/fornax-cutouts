@@ -678,6 +678,20 @@ wheels = [
 ]
 
 [[package]]
+name = "fastapi-utils"
+version = "0.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "psutil" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dd/af/57c949675176acf389d94fbccd369b486579a952637fc6fb104f1bc3d0c3/fastapi_utils-0.8.0.tar.gz", hash = "sha256:eca834e80c09f85df30004fe5e861981262b296f60c93d5a1a1416fe4c784140", size = 16496, upload-time = "2024-11-11T08:30:03.852Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/8b/cef8cfed7ed77d52fc772b1c7b966ba019a3f50b65a2b3625a0f3b7f6f53/fastapi_utils-0.8.0-py3-none-any.whl", hash = "sha256:6c4d507a76bab9a016cee0c4fa3a4638c636b2b2689e39c62254b1b2e4e81825", size = 18495, upload-time = "2024-11-11T08:30:01.914Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -694,6 +708,7 @@ dependencies = [
     { name = "astrocut" },
     { name = "celery" },
     { name = "fastapi" },
+    { name = "fastapi-utils" },
     { name = "pydantic" },
     { name = "redis" },
     { name = "vo-models" },
@@ -701,6 +716,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "isort" },
     { name = "pre-commit" },
     { name = "ruff" },
     { name = "uvicorn", extra = ["standard"] },
@@ -709,15 +725,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "astrocut", specifier = ">=1.1.0" },
-    { name = "celery", specifier = ">=5.5.3" },
-    { name = "fastapi", specifier = ">=0.119.0" },
-    { name = "pydantic", specifier = ">=2.12.2" },
-    { name = "redis", specifier = ">=6.4.0" },
-    { name = "vo-models", specifier = ">=0.5.1" },
+    { name = "celery", specifier = ">=5.5.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "fastapi-utils", specifier = ">=0.8.0" },
+    { name = "pydantic", specifier = ">=2.6,<3" },
+    { name = "redis", specifier = ">=6.2" },
+    { name = "vo-models", specifier = ">=0.5.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "isort", specifier = ">=7.0.0" },
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "ruff", specifier = ">=0.14.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.37.0" },
@@ -939,6 +957,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/76/66/650a33bd90f786193e4de4b3ad86ea60b53c89b669a5c7be931fac31cdb0/importlib_metadata-8.7.0.tar.gz", hash = "sha256:d13b81ad223b890aa16c5471f2ac3056cf76c5f10f82d6f9292f0b415f389000", size = 56641, upload-time = "2025-04-27T15:29:01.736Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/b0/36bd937216ec521246249be3bf9855081de4c5e06a0c9b4219dbeda50373/importlib_metadata-8.7.0-py3-none-any.whl", hash = "sha256:e5dd1551894c77868a30651cef00984d50e1002d06942a7101d34870c5f02afd", size = 27656, upload-time = "2025-04-27T15:29:00.214Z" },
+]
+
+[[package]]
+name = "isort"
+version = "7.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/63/53/4f3c058e3bace40282876f9b553343376ee687f3c35a525dc79dbd450f88/isort-7.0.0.tar.gz", hash = "sha256:5513527951aadb3ac4292a41a16cbc50dd1642432f5e8c20057d414bdafb4187", size = 805049, upload-time = "2025-10-11T13:30:59.107Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7f/ed/e3705d6d02b4f7aea715a353c8ce193efd0b5db13e204df895d38734c244/isort-7.0.0-py3-none-any.whl", hash = "sha256:1bcabac8bc3c36c7fb7b98a76c8abb18e0f841a3ba81decac7691008592499c1", size = 94672, upload-time = "2025-10-11T13:30:57.665Z" },
 ]
 
 [[package]]
@@ -1532,6 +1559,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/48/f0/615c30622316496d2cbbc29f5985f7777d3ada70f23370608c1d3e081c1f/propcache-0.4.1-cp313-cp313t-win_amd64.whl", hash = "sha256:f7ee0e597f495cf415bcbd3da3caa3bd7e816b74d0d52b8145954c5e6fd3ff37", size = 44897, upload-time = "2025-10-08T19:47:48.336Z" },
     { url = "https://files.pythonhosted.org/packages/fd/ca/6002e46eccbe0e33dcd4069ef32f7f1c9e243736e07adca37ae8c4830ec3/propcache-0.4.1-cp313-cp313t-win_arm64.whl", hash = "sha256:929d7cbe1f01bb7baffb33dc14eb5691c95831450a26354cd210a8155170c93a", size = 39789, upload-time = "2025-10-08T19:47:49.876Z" },
     { url = "https://files.pythonhosted.org/packages/5b/5a/bc7b4a4ef808fa59a816c17b20c4bef6884daebbdf627ff2a161da67da19/propcache-0.4.1-py3-none-any.whl", hash = "sha256:af2a6052aeb6cf17d3e46ee169099044fd8224cbaf75c76a2ef596e8163e2237", size = 13305, upload-time = "2025-10-08T19:49:00.792Z" },
+]
+
+[[package]]
+name = "psutil"
+version = "5.9.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/c7/6dc0a455d111f68ee43f27793971cf03fe29b6ef972042549db29eec39a2/psutil-5.9.8.tar.gz", hash = "sha256:6be126e3225486dff286a8fb9a06246a5253f4c7c53b475ea5f5ac934e64194c", size = 503247, upload-time = "2024-01-19T20:47:09.517Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/e3/07ae864a636d70a8a6f58da27cb1179192f1140d5d1da10886ade9405797/psutil-5.9.8-cp36-abi3-macosx_10_9_x86_64.whl", hash = "sha256:aee678c8720623dc456fa20659af736241f575d79429a0e5e9cf88ae0605cc81", size = 248702, upload-time = "2024-01-19T20:47:36.303Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/bd/28c5f553667116b2598b9cc55908ec435cb7f77a34f2bff3e3ca765b0f78/psutil-5.9.8-cp36-abi3-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:8cb6403ce6d8e047495a701dc7c5bd788add903f8986d523e3e20b98b733e421", size = 285242, upload-time = "2024-01-19T20:47:39.65Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/4f/0e22aaa246f96d6ac87fe5ebb9c5a693fbe8877f537a1022527c47ca43c5/psutil-5.9.8-cp36-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d06016f7f8625a1825ba3732081d77c94589dca78b7a3fc072194851e88461a4", size = 288191, upload-time = "2024-01-19T20:47:43.078Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/f5/2aa3a4acdc1e5940b59d421742356f133185667dd190b166dbcfcf5d7b43/psutil-5.9.8-cp37-abi3-win32.whl", hash = "sha256:bc56c2a1b0d15aa3eaa5a60c9f3f8e3e565303b465dbf57a1b730e7a2b9844e0", size = 251252, upload-time = "2024-01-19T20:47:52.88Z" },
+    { url = "https://files.pythonhosted.org/packages/93/52/3e39d26feae7df0aa0fd510b14012c3678b36ed068f7d78b8d8784d61f0e/psutil-5.9.8-cp37-abi3-win_amd64.whl", hash = "sha256:8db4c1b57507eef143a15a6884ca10f7c73876cdf5d51e713151c1236a0e68cf", size = 255090, upload-time = "2024-01-19T20:47:56.019Z" },
+    { url = "https://files.pythonhosted.org/packages/05/33/2d74d588408caedd065c2497bdb5ef83ce6082db01289a1e1147f6639802/psutil-5.9.8-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:d16bbddf0693323b8c6123dd804100241da461e41d6e332fb0ba6058f630f8c8", size = 249898, upload-time = "2024-01-19T20:47:59.238Z" },
 ]
 
 [[package]]

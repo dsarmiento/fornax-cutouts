@@ -11,10 +11,10 @@ from vo_models.uws.models import Jobs
 from vo_models.uws.types import ExecutionPhase
 from vo_models.voresource.types import UTCTimestamp
 
-from mast.cutouts.celery_tasks import schedule_job
-from mast.cutouts.filename_resolver.missions import VALID_MISSIONS
-from mast.cutouts.models.cutouts import CutoutJobSummary
-from mast.cutouts.uws_redis import UWSRedis, uws_redis_client
+from fornax_cutouts.models.cutouts import CutoutJobSummary
+from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.tasks import schedule_job
+from fornax_cutouts.utils.uws_redis import UWSRedis, uws_redis_client
 
 uws_router = APIRouter(prefix="/cutouts/async")
 
@@ -91,7 +91,11 @@ class CutoutsUWSHandler:
         job_summary = await self.uws_redis.create_job(job_summary)
 
         form = await request.form()
-        mission_params = {mission: json.loads(params) for mission, params in form.items() if mission in VALID_MISSIONS}
+        mission_params = {
+            mission: json.loads(params)
+            for mission, params in form.items()
+            if mission in cutout_registry.get_source_names()
+        }
 
         schedule_job.apply_async(
             task_id=f"cutout-{job_summary.job_id}",
