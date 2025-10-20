@@ -26,7 +26,7 @@ class CutoutRegistry:
     def get_source_names(self) -> list[str]:
         return sorted(self._SOURCES)
 
-    def get_mission_metadata(self) -> dir[str, MissionMetadata]:
+    def get_mission_metadata(self) -> dict[str, MissionMetadata]:
         return {mission.metadata.name: mission.metadata for mission in self._SOURCES.values()}
 
     def validate_mission_params(
