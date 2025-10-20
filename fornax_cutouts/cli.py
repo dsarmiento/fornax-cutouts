@@ -2,23 +2,32 @@ import argparse
 import subprocess
 import sys
 
-from fornax_cutouts.constants import LOG_LEVEL
+from fornax_cutouts.config import CONFIG
+from fornax_cutouts.sources import cutout_registry
 
 
-def run_api():
-    """Start FastAPI using uvicorn."""
-    cmd = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "fornax_cutouts.app.api:main_app",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "8000",
-        "--reload",
-    ]
-    subprocess.run(cmd, check=True)
+def run_api(
+    host: str = "0.0.0.0",
+    port: int = 8000,
+    reload: bool = False,
+    workers: int = 1,
+):
+    import uvicorn
+
+    from fornax_cutouts.app.api import main_app
+
+    # reload and workers>1 can't be used together
+    if reload and workers != 1:
+        raise SystemExit("--reload cannot be combined with --workers > 1")
+
+    uvicorn.run(
+        main_app,
+        host=host,
+        port=port,
+        reload=reload,
+        workers=workers,
+        log_level=CONFIG.log_level,
+    )
 
 
 def run_worker():
@@ -31,7 +40,7 @@ def run_worker():
         "fornax_cutouts.app.celery_app.celery_app",
         "worker",
         "--loglevel",
-        LOG_LEVEL,
+        CONFIG.log_level,
     ]
     subprocess.run(cmd, check=True)
 
@@ -44,6 +53,8 @@ def main():
         help="Choose 'api' to start FastAPI service or 'worker' to start Celery worker.",
     )
     args = parser.parse_args()
+
+    cutout_registry.discover_sources()
 
     if args.command == "api":
         run_api()

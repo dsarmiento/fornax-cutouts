@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException, status
 from fastapi_utils.cbv import cbv
 
 from fornax_cutouts.models.metadata import FilenameRequest
@@ -21,7 +21,12 @@ class MetadataHandler:
         self,
         mission: str,
     ):
-        return cutout_registry[mission]
+        try:
+            return cutout_registry.get_mission(mission).metadata
+        except KeyError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Mission does not exist"
+            )
 
     @metadata_router.post("/filenames")
     def get_filenames(
@@ -41,7 +46,9 @@ class MetadataHandler:
             request_dict = fname_request.model_dump()
             request_dict["position"] = resolved_positions
             request_dict = {k: v for k, v in request_dict.items() if v is not None}
-            mission_result[mission_name] = cutout_registry[mission_name].get_filenames(**request_dict)
+            mission_result[mission_name] = cutout_registry.get_mission(mission_name).get_filenames(
+                **request_dict
+            )
 
         # TODO: Build a pydantic model of the return
         return {
@@ -61,11 +68,16 @@ class MetadataHandler:
         if fname_request.position is None:
             raise ValueError("'position' cannot be null")
 
-        request_dict = fname_request.model_dump()
-        request_dict["position"] = resolve_positions(fname_request.position)
-        request_dict = {k: v for k, v in request_dict.items() if v is not None}
-
-        fnames = cutout_registry[mission].get_filenames(**request_dict)
+        mission_params = {
+            mission: {
+                k: v for k, v in fname_request.model_dump().items() if v is not None and k != "position"
+            }
+        }
+        print(mission_params)
+        fnames = cutout_registry.get_target_filenames(
+            position=resolve_positions(fname_request.position),
+            mission_params=mission_params,
+        )
 
         return {
             "request": fname_request,

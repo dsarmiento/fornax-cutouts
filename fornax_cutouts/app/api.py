@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated
@@ -7,8 +8,10 @@ from fastapi import Depends, FastAPI
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from fornax_cutouts.routes.v0 import api_v0
+from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.uws_redis import UWSRedis, uws_redis_client
 
+logger = logging.getLogger("uvicorn")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,6 +22,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print("redis isn't up")
         print(f"{e}")
+
+    logger.info(f"Registered sources: {cutout_registry.get_source_names()}")
 
     yield
 
