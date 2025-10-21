@@ -16,7 +16,7 @@ from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.tasks import schedule_job
 from fornax_cutouts.utils.uws_redis import UWSRedis, uws_redis_client
 
-uws_router = APIRouter(prefix="/cutouts/async")
+uws_router = APIRouter(prefix="/cutouts")
 
 
 class PhaseAction(StrEnum):
@@ -34,7 +34,7 @@ class XmlResponse(Response):
 class CutoutsUWSHandler:
     uws_redis: UWSRedis = Depends(uws_redis_client)
 
-    @uws_router.get("/")
+    @uws_router.get("/async")
     async def get_jobs(
         self,
         request: Request,
@@ -66,7 +66,7 @@ class CutoutsUWSHandler:
         jobs = await self.uws_redis.get_jobs(phase=phase, after=after, last=last)
         return XmlResponse(jobs.to_xml())
 
-    @uws_router.post("/")
+    @uws_router.post("/async")
     async def post_job(
         self,
         request: Request,
@@ -110,7 +110,7 @@ class CutoutsUWSHandler:
         redirect_url = request.url.path + job_summary.job_id
         return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
-    @uws_router.get("/{job_id}")
+    @uws_router.get("/async/{job_id}")
     async def get_job(
         self,
         job_id: Annotated[
@@ -128,7 +128,7 @@ class CutoutsUWSHandler:
                 detail=f"Cutout job {job_id!r} not found.",
             )
 
-    @uws_router.delete("/{job_id}")
+    @uws_router.delete("/async/{job_id}")
     def delete_job(
         self,
         job_id: Annotated[
@@ -146,7 +146,7 @@ class CutoutsUWSHandler:
         """
         return
 
-    @uws_router.get("/{job_id}/phase")
+    @uws_router.get("/async/{job_id}/phase")
     async def get_job_phase(
         self,
         job_id: Annotated[
@@ -161,7 +161,7 @@ class CutoutsUWSHandler:
         job_summary = await self.uws_redis.get_job(job_id)
         return job_summary.phase
 
-    @uws_router.post("/{job_id}/phase")
+    @uws_router.post("/async{job_id}/phase")
     def post_job_phase(
         self,
         job_id: Annotated[
@@ -179,7 +179,7 @@ class CutoutsUWSHandler:
         """
         return
 
-    @uws_router.get("/{job_id}/executionduration")
+    @uws_router.get("/async/{job_id}/executionduration")
     async def get_job_executionduration(
         self,
         job_id: Annotated[
@@ -195,7 +195,7 @@ class CutoutsUWSHandler:
         job_summary = await self.uws_redis.get_job(job_id)
         return job_summary.execution_duration
 
-    @uws_router.get("/{job_id}/destruction")
+    @uws_router.get("/async/{job_id}/destruction")
     def get_job_destruction(
         self,
         job_id: Annotated[
@@ -209,7 +209,7 @@ class CutoutsUWSHandler:
         """
         return
 
-    @uws_router.post("/{job_id}/destruction")
+    @uws_router.post("/async{job_id}/destruction")
     def post_job_destruction(
         self,
         job_id: Annotated[
@@ -230,7 +230,7 @@ class CutoutsUWSHandler:
         """
         return
 
-    @uws_router.get("/{job_id}/error")
+    @uws_router.get("/async/{job_id}/error")
     async def get_job_error(
         self,
         job_id: Annotated[
@@ -246,7 +246,7 @@ class CutoutsUWSHandler:
         job_summary = await self.uws_redis.get_job(job_id)
         return job_summary.error_summary
 
-    @uws_router.get("/{job_id}/quote")
+    @uws_router.get("/async/{job_id}/quote")
     async def get_job_quote(
         self,
         job_id: Annotated[
@@ -262,7 +262,7 @@ class CutoutsUWSHandler:
         job_summary = await self.uws_redis.get_job(job_id)
         return job_summary.quote if job_summary.quote is not None else ""
 
-    @uws_router.get("/{job_id}/results")
+    @uws_router.get("/async/{job_id}/results")
     async def get_job_results(
         self,
         job_id: Annotated[
@@ -277,7 +277,7 @@ class CutoutsUWSHandler:
         job_summary = await self.uws_redis.get_job(job_id)
         return job_summary.results
 
-    @uws_router.get("/{job_id}/parameters")
+    @uws_router.get("/async/{job_id}/parameters")
     async def get_job_parameters(
         self,
         job_id: Annotated[
@@ -292,7 +292,7 @@ class CutoutsUWSHandler:
         job_summary = await self.uws_redis.get_job(job_id)
         return job_summary.parameters
 
-    @uws_router.post("/{job_id}/parameters")
+    @uws_router.post("/async{job_id}/parameters")
     def post_job_parameters(
         self,
         job_id: Annotated[
@@ -309,7 +309,7 @@ class CutoutsUWSHandler:
         """
         return
 
-    @uws_router.get("/{job_id}/owner")
+    @uws_router.get("/async/{job_id}/owner")
     async def get_job_owner(
         self,
         job_id: Annotated[

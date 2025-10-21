@@ -9,7 +9,8 @@ from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
 from fornax_cutouts.app.celery_app import celery_app
-from fornax_cutouts.constants import ASYNC_TTL, CUTOUT_STORAGE_IS_S3, CUTOUT_STORAGE_PREFIX, SYNC_TTL
+from fornax_cutouts.config import CONFIG
+from fornax_cutouts.constants import CUTOUT_STORAGE_IS_S3, CUTOUT_STORAGE_PREFIX
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse, FileResponse
 from fornax_cutouts.sources import cutout_registry
@@ -57,7 +58,7 @@ def schedule_job(
                     size=size,
                     output_format=output_format,
                     output_dir=target_fname.mission,
-                    ttl=ASYNC_TTL,
+                    ttl=CONFIG.async_ttl,
                 )
                 jobs.append(job)
 
@@ -100,7 +101,7 @@ def generate_cutout(  # noqa: C901
     output_format: list[str],
     output_dir: str = "",
     colorize: bool = False,
-    ttl: int = SYNC_TTL,
+    ttl: int = CONFIG.sync_ttl,
 ) -> CutoutResponse:
     """
     Generate a cutout within the specific source file

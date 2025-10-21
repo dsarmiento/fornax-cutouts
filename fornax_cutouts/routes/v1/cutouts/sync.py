@@ -6,27 +6,27 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi_utils.cbv import cbv
 
-from fornax_cutouts.constants import SYNC_TTL
+from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
 from fornax_cutouts.tasks import generate_cutout
 
-sync_router = APIRouter(prefix="/cutouts/sync")
+sync_router = APIRouter(prefix="/cutouts")
 
 
 @cbv(sync_router)
 class CutoutsSyncHandler:
-    @sync_router.get("/")
+    @sync_router.get("/sync")
     async def get_cutout(self, request: Request):
         """
         Redirect to the /single endpoint, keeping all query params
         """
         query_params = dict(request.query_params)
         new_query = urlencode(query_params)
-        redirect_url = f"{request.url.path}single?{new_query}"
+        redirect_url = f"{request.url.path}/single?{new_query}"
         return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
-    @sync_router.get("/single")
+    @sync_router.get("/sync/single")
     async def get_single_cutout(
         self,
         filename: Annotated[str, Query(description="Publicly available source URL/S3 URI to generate a cutout for")],
@@ -49,7 +49,7 @@ class CutoutsSyncHandler:
                 source_file=filename,
                 target=TargetPosition(ra, dec),
                 size=size,
-                ttl=SYNC_TTL,
+                ttl=CONFIG.sync_ttl,
             )
         except InvalidQueryError as e:
             raise HTTPException(
@@ -57,7 +57,7 @@ class CutoutsSyncHandler:
                 detail=e,
             )
 
-    @sync_router.get("/color")
+    @sync_router.get("/sync/color")
     async def get_color_cutout(
         self,
         r: Annotated[str, Query(description="Red channel for a color cutout preview")],
@@ -78,7 +78,7 @@ class CutoutsSyncHandler:
                 target=TargetPosition(ra, dec),
                 size=size,
                 colorize=True,
-                ttl=SYNC_TTL,
+                ttl=CONFIG.sync_ttl,
             )
         except InvalidQueryError as e:
             raise HTTPException(

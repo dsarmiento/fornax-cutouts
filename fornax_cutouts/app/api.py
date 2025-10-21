@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from fornax_cutouts.routes.v0 import api_v0
+from fornax_cutouts.routes.v1 import api_v1
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.uws_redis import UWSRedis, uws_redis_client
 
@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
 
 
 main_app = FastAPI(lifespan=lifespan)
-main_app.include_router(api_v0, prefix="/api/v0")
+main_app.include_router(api_v1, prefix="/api/v0")   # Beta routes, eventually will be promoted to v1
 
 
 @main_app.get("/api/health")

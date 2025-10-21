@@ -12,7 +12,7 @@ from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 from vo_models.uws.models import ExecutionPhase, Jobs, ShortJobDescription
 
-from fornax_cutouts.constants import REDIS_HOST, REDIS_IS_CLUSTER, REDIS_PORT, REDIS_USE_SSL
+from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.cutouts import CutoutJobSummary
 
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
@@ -30,12 +30,12 @@ def uws_redis_client():
 class UWSRedis:
     def __init__(self):
         redis_kwargs = {
-            "host": REDIS_HOST,
-            "port": REDIS_PORT,
-            "ssl": REDIS_USE_SSL,
+            "host": CONFIG.redis.host,
+            "port": CONFIG.redis.port,
+            "ssl": CONFIG.redis.use_ssl,
         }
 
-        if REDIS_IS_CLUSTER:
+        if CONFIG.redis.is_cluster:
             r = RedisCluster(**redis_kwargs)
         else:
             r = RedisClient(**redis_kwargs)
