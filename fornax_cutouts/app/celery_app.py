@@ -1,10 +1,17 @@
 import ssl
 
 from celery import Celery
+from celery.utils.log import get_task_logger
 
 from fornax_cutouts.config import CONFIG
 
-celery_app = Celery("fornax-cutouts", broker=CONFIG.redis.uri, backend=CONFIG.redis.uri)
+logger = get_task_logger("cutouts")
+
+celery_app = Celery(
+    "fornax-cutouts",
+    broker=CONFIG.redis.uri,
+    backend=CONFIG.redis.uri,
+)
 
 conf_update = {
     "broker_transport_options": {

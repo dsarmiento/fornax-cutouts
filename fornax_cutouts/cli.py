@@ -1,6 +1,4 @@
 import argparse
-import subprocess
-import sys
 
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.sources import cutout_registry
@@ -32,17 +30,13 @@ def run_api(
 
 def run_worker():
     """Start Celery worker."""
-    cmd = [
-        sys.executable,
-        "-m",
-        "celery",
-        "-A",
-        "fornax_cutouts.app.celery_app.celery_app",
+    import fornax_cutouts.tasks  # register the tasks
+    from fornax_cutouts.app.celery_app import celery_app
+
+    celery_app.worker_main([
         "worker",
-        "--loglevel",
-        CONFIG.log_level,
-    ]
-    subprocess.run(cmd, check=True)
+        f"--loglevel={CONFIG.log_level}"
+    ])
 
 
 def main():

@@ -10,10 +10,11 @@ class RedisConfig(BaseModel):
     is_cluster: bool = False
     use_ssl: bool = False
     timeout: float = 15.0
+    vector_en: bool = False
 
     @property
     def uri(self):
-        return f"redis{'s' if self.use_ssl else ''}://{self.host}/{self.port}/0"
+        return f"redis{'s' if self.use_ssl else ''}://{self.host}:{self.port}/0"
 
 
 class FornaxCutoutsConfig(BaseSettings):

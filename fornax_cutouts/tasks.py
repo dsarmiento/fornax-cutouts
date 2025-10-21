@@ -8,7 +8,7 @@ from celery import chord
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
-from fornax_cutouts.app.celery_app import celery_app
+from fornax_cutouts.app.celery_app import celery_app, logger
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.constants import CUTOUT_STORAGE_IS_S3, CUTOUT_STORAGE_PREFIX
 from fornax_cutouts.models.base import TargetPosition
@@ -18,7 +18,7 @@ from fornax_cutouts.utils.santa_resolver import resolve_positions
 from fornax_cutouts.utils.uws_redis import uws_redis_client
 
 
-@celery_app.task
+@celery_app.task(pydantic=True)
 def schedule_job(
     job_id: str,
     position: list[str],
@@ -39,7 +39,7 @@ def schedule_job(
             if not is_valid:
                 # Specific mission isn't valid, let user know
                 # TODO: Should we allow the user re-submit the mission params for re-scheduling?
-                print(f"{mission!r} params are not valid, please recheck and resubmit.")
+                logger.error(f"{mission!r} params are not valid, please recheck and resubmit.")
                 del mission_params[mission]
 
         target_fnames = cutout_registry.get_target_filenames(
@@ -70,7 +70,7 @@ def schedule_job(
     asyncio.run(task())
 
 
-@celery_app.task
+@celery_app.task(pydantic=True)
 def all_done(_, job_id: str):
     async def task():
         r = uws_redis_client()
@@ -92,7 +92,7 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
     return filter
 
 
-@celery_app.task
+@celery_app.task(pydantic=True)
 def generate_cutout(  # noqa: C901
     job_id: str,
     source_file: str | list[str],

@@ -20,8 +20,6 @@ CUTOUT_INDEX_NAME = "cutoutIdx"
 CUTOUT_PREFIX = "cutout"
 CUTOUT_JOB_PREFIX = f"{CUTOUT_PREFIX}:jobs"
 
-CACHE_SEARCH_EN = False
-
 
 def uws_redis_client():
     return UWSRedis()
@@ -43,7 +41,7 @@ class UWSRedis:
         self.__redis_client = r
 
     async def _setup_index(self):
-        if not CACHE_SEARCH_EN:
+        if not CONFIG.redis.vector_en:
             return
 
         try:
@@ -120,7 +118,7 @@ class UWSRedis:
     ) -> Jobs:
         jobref = []
 
-        if CACHE_SEARCH_EN:
+        if CONFIG.redis.vector_en:
             query_str = ""
 
             if phase:

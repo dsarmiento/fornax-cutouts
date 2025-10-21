@@ -107,7 +107,7 @@ class CutoutsUWSHandler:
                 "output_format": output_format,
             },
         )
-        redirect_url = request.url.path + job_summary.job_id
+        redirect_url = f"{request.url.path}/{job_summary.job_id}"
         return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
     @uws_router.get("/async/{job_id}")

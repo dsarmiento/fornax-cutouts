@@ -8,7 +8,6 @@ from fastapi import Depends, FastAPI
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from fornax_cutouts.routes.v1 import api_v1
-from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.uws_redis import UWSRedis, uws_redis_client
 
 logger = logging.getLogger("uvicorn")
@@ -20,10 +19,8 @@ async def lifespan(app: FastAPI):
         await r._setup_index()
         await r.close()
     except Exception as e:
-        print("redis isn't up")
-        print(f"{e}")
-
-    logger.info(f"Registered sources: {cutout_registry.get_source_names()}")
+        logger.error("Redis DB is not up")
+        logger.error(f"{e}")
 
     yield
 

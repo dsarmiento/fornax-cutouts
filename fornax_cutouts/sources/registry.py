@@ -23,6 +23,8 @@ class CutoutRegistry:
             module = module_from_spec(spec)
             spec.loader.exec_module(module)
 
+        print(f"Registered sources: {self.get_source_names()}")
+
     def register_source(self, mission: str):
         def _decorator(cls: AbstractMissionSource) -> AbstractMissionSource:
             self._SOURCES[mission] = cls()
