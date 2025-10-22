@@ -136,7 +136,7 @@ class UWSRedis:
 
             for doc in results.docs:
                 job_obj = json.loads(doc.json)
-                job_obj["href"] = f"/cutouts/{job_obj['job_id']}"
+                job_obj["href"] = f"/cutouts/async/{job_obj['job_id']}"
                 jobref.append(ShortJobDescription(**job_obj))
 
         else:

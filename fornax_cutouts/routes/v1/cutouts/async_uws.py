@@ -72,7 +72,7 @@ class CutoutsUWSHandler:
         request: Request,
         position: Annotated[list[str], Form()],
         size: Annotated[int, Form()],
-        output_format: Annotated[list[str], Form()] = ["fits", "jpg"],
+        output_format: Annotated[list[str], Form()] = ["fits"],
         # relevant spec: https://www.ivoa.net/documents/DALI/20170517/REC-DALI-1.1.html#tth_sEc3.4.6
         run_id: Annotated[
             str,

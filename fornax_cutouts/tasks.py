@@ -119,116 +119,125 @@ def generate_cutout(  # noqa: C901
         ttl (int, optional): If destination is S3, time to live of the signed url in seconds.
             Defaults to 1 hr.
     """
-    if isinstance(size, int):
-        size = (size, size)
+    async def task():
+        if isinstance(size, int):
+            size = (size, size)
 
-    if colorize:
-        assert isinstance(source_file, list) and len(source_file) == 3, "Color image must have exactly 3 source images"
+        if colorize:
+            assert isinstance(source_file, list) and len(source_file) == 3, "Color image must have exactly 3 source images"
 
-    else:
-        if isinstance(source_file, str):
-            source_file = [source_file]
-        assert isinstance(source_file, list) and len(source_file) == 1, "Cutout must have exactly one source"
+        else:
+            if isinstance(source_file, str):
+                source_file = [source_file]
+            assert isinstance(source_file, list) and len(source_file) == 1, "Cutout must have exactly one source"
 
-    temp_output_dir = "/tmp/cutouts/"
+        temp_output_dir = "/tmp/cutouts/"
 
-    cutout = astrocut.FITSCutout(
-        input_files=source_file,
-        coordinates=f"{target[0]} {target[1]}",
-        cutout_size=size,
-        single_outfile=False,
-    )
-
-    filter: str | ColorFilter | None = None
-    if colorize:
-        filter = ColorFilter(
-            red=get_fits_filter(cutout.fits_cutouts[0]),
-            green=get_fits_filter(cutout.fits_cutouts[1]),
-            blue=get_fits_filter(cutout.fits_cutouts[2]),
-        )
-    else:
-        filter = get_fits_filter(cutout.fits_cutouts[0])
-
-    cutout_prefix = source_file[0]
-    cutout_prefix = urlparse(cutout_prefix).path
-    cutout_prefix = Path(cutout_prefix).stem
-
-    lpaths = []
-
-    fits_fname = ""
-    if "fits" in output_format:
-        fits_fname = cutout.write_as_fits(
-            output_dir=temp_output_dir,
-            cutout_prefix=cutout_prefix,
-        )[0]
-
-        lpaths.append(fits_fname)
-
-    img_fname = ""
-    if "jpg" in output_format or "jpeg" in output_format:
-        img_fname = cutout.write_as_img(
-            output_dir=temp_output_dir,
-            cutout_prefix=cutout_prefix,
-            colorize=colorize,
+        cutout = astrocut.FITSCutout(
+            input_files=source_file,
+            coordinates=f"{target[0]} {target[1]}",
+            cutout_size=size,
+            single_outfile=False,
         )
 
-        if not colorize:
-            img_fname = img_fname[0]
+        filter: str | ColorFilter | None = None
+        if colorize:
+            filter = ColorFilter(
+                red=get_fits_filter(cutout.fits_cutouts[0]),
+                green=get_fits_filter(cutout.fits_cutouts[1]),
+                blue=get_fits_filter(cutout.fits_cutouts[2]),
+            )
+        else:
+            filter = get_fits_filter(cutout.fits_cutouts[0])
 
-        lpaths.append(img_fname)
+        cutout_prefix = source_file[0]
+        cutout_prefix = urlparse(cutout_prefix).path
+        cutout_prefix = Path(cutout_prefix).stem
 
-    fs: AbstractFileSystem
-    if CUTOUT_STORAGE_IS_S3:
-        fs = filesystem("s3")
-    else:
-        fs = filesystem("local")
+        lpaths = []
 
-    rpath = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{job_id}/"
-    if output_dir:
-        rpath += f"{output_dir}/"
+        fits_fname = ""
+        if "fits" in output_format:
+            fits_fname = cutout.write_as_fits(
+                output_dir=temp_output_dir,
+                cutout_prefix=cutout_prefix,
+            )[0]
 
-    if not fs.isdir(rpath):
-        fs.mkdir(rpath)
+            lpaths.append(fits_fname)
 
-    for lpath in lpaths:
-        fs.put(
-            lpath=lpath,
-            rpath=rpath,
-        )
+        img_fname = ""
+        if "jpg" in output_format or "jpeg" in output_format:
+            img_fname = cutout.write_as_img(
+                output_dir=temp_output_dir,
+                cutout_prefix=cutout_prefix,
+                colorize=colorize,
+            )
 
-    fits_url = fits_fname.replace(temp_output_dir, rpath)
-    img_url = img_fname.replace(temp_output_dir, rpath)
+            if not colorize:
+                img_fname = img_fname[0]
 
-    if CUTOUT_STORAGE_IS_S3:
+            lpaths.append(img_fname)
+
+        fs: AbstractFileSystem
+        if CUTOUT_STORAGE_IS_S3:
+            fs = filesystem("s3")
+        else:
+            fs = filesystem("local")
+
+        rpath = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{job_id}/"
+        if output_dir:
+            rpath += f"{output_dir}/"
+
+        if not fs.isdir(rpath):
+            fs.mkdir(rpath)
+
+        for lpath in lpaths:
+            fs.put(
+                lpath=lpath,
+                rpath=rpath,
+            )
+
+        fits_url = fits_fname.replace(temp_output_dir, rpath)
+        img_url = img_fname.replace(temp_output_dir, rpath)
+
+        if CUTOUT_STORAGE_IS_S3:
+            if fits_url:
+                fits_url = fs.sign(fits_url, expiration=ttl)
+            if img_url:
+                img_url = fs.sign(img_url, expiration=ttl)
+        # If generating local cutouts just return the relative path
+        else:
+            if fits_url:
+                fits_url = fits_url.replace(CUTOUT_STORAGE_PREFIX, "")
+            if img_url:
+                img_url = img_url.replace(CUTOUT_STORAGE_PREFIX, "")
+
+        fits = None
         if fits_url:
-            fits_url = fs.sign(fits_url, expiration=ttl)
-        if img_url:
-            img_url = fs.sign(img_url, expiration=ttl)
-    # If generating local cutouts just return the relative path
-    else:
-        if fits_url:
-            fits_url = fits_url.replace(CUTOUT_STORAGE_PREFIX, "")
-        if img_url:
-            img_url = img_url.replace(CUTOUT_STORAGE_PREFIX, "")
+            fits = FileResponse(
+                filename=fits_fname.replace(temp_output_dir, ""),
+                url=fits_url,
+            )
 
-    fits = None
-    if fits_url:
-        fits = FileResponse(
-            filename=fits_fname.replace(temp_output_dir, ""),
-            url=fits_url,
+        preview = None
+        if img_url:
+            preview = FileResponse(
+                filename=img_fname.replace(temp_output_dir, ""),
+                url=img_url,
+            )
+
+        resp = CutoutResponse(
+            fits=fits,
+            preview=preview,
+            position=target,
+            size_px=size,
+            filter=filter,
         )
 
-    preview = None
-    if img_url:
-        preview = FileResponse(
-            filename=img_fname.replace(temp_output_dir, ""),
-            url=img_url,
-        )
+        if job_id != "sync":
+            r = uws_redis_client()
+            await r.append_job_result(job_id, resp)
 
-    return CutoutResponse(
-        fits=fits,
-        preview=preview,
-        position=target,
-        size_px=size,
-        filter=filter,
-    )
+        return resp
+
+    asyncio.run(task())

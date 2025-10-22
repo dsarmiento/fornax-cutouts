@@ -10,6 +10,7 @@ from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
 @dataclass
 class CutoutRegistry:
     _SOURCES: dict[str, AbstractMissionSource] = field(default_factory=dict, init=False)
+    _VALID_SOURCES: list[str] = field(default_factory=list, init=False)
 
     def get_mission(self, mission: str) -> AbstractMissionSource:
         try:
@@ -28,12 +29,14 @@ class CutoutRegistry:
     def register_source(self, mission: str):
         def _decorator(cls: AbstractMissionSource) -> AbstractMissionSource:
             self._SOURCES[mission] = cls()
+            self._VALID_SOURCES.append(mission)
+            self._VALID_SOURCES = sorted(self._VALID_SOURCES)
             return cls
 
         return _decorator
 
     def get_source_names(self) -> list[str]:
-        return sorted(self._SOURCES)
+        return self._VALID_SOURCES
 
     def get_mission_metadata(self) -> dict[str, MissionMetadata]:
         return {mission.metadata.name: mission.metadata for mission in self._SOURCES.values()}
