@@ -147,13 +147,13 @@ class UWSRedis:
 
         else:
             keys = []
-            for key in self.__redis_client.scan_iter(match=f"{CUTOUT_JOB_PREFIX}:*", count=100):
+            async for key in self.__redis_client.scan_iter(match=f"{CUTOUT_JOB_PREFIX}:*", count=100):
                 keys.append(key.decode())
 
             if keys:
                 for i in range(0, len(keys), 100):
                     batch_keys = keys[i : i + 100]
-                    value = self.__redis_client.json().mget(batch_keys, Path.root_path())
+                    value = await self.__redis_client.json().mget(batch_keys, Path.root_path())
                     jobref.extend(value)
 
                 jobref.sort(key=lambda job: job["creation_time"], reverse=True)
