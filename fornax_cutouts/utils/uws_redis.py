@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pprint import pprint
 from typing import Any
 
 from redis import ResponseError
 from redis.asyncio import Redis as RedisClient
 from redis.asyncio import RedisCluster
-from redis.commands.search.field import NumericField, TextField
+from redis.commands.json.path import Path
+from redis.commands.search.field import NumericField, TagField
 from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 from vo_models.uws.models import ExecutionPhase, Jobs, ShortJobDescription
@@ -41,14 +43,14 @@ class UWSRedis:
         self.__redis_client = r
 
     async def _setup_index(self):
-        if not CONFIG.redis.vector_en:
+        if not CONFIG.redis.search_en:
             return
 
         try:
             print("Setting up redis indexes")
             await self.__redis_client.ft(CUTOUT_INDEX_NAME).create_index(
                 fields=[
-                    TextField("$.phase", as_name="phase"),
+                    TagField("$.phase", as_name="phase"),
                     NumericField("$.creation_time", as_name="creation_time"),
                 ],
                 definition=IndexDefinition(
@@ -78,7 +80,7 @@ class UWSRedis:
         self,
         job_id: str,
         time_field: str,
-        time: datetime = datetime.now(),
+        time: datetime | None = None,
     ):
         """
         Using the linux timestamp to save the time into redis for efficient redis querying when filtering on dates
@@ -88,6 +90,9 @@ class UWSRedis:
             time_field (str): Timestamp field to set
             time (datetime, optional): Time object to set. Defaults to datetime.now().
         """
+        if time is None:
+            time = datetime.now()
+
         await self.__update_job(
             job_id=job_id,
             path=f"$.{time_field}",
@@ -108,6 +113,7 @@ class UWSRedis:
 
     async def get_job(self, job_id: str) -> CutoutJobSummary:
         job_json = await self.__redis_client.json().get(f"{CUTOUT_JOB_PREFIX}:{job_id}")
+        del job_json["results"]["results"]
         return CutoutJobSummary(**job_json)
 
     async def get_jobs(
@@ -118,7 +124,7 @@ class UWSRedis:
     ) -> Jobs:
         jobref = []
 
-        if CONFIG.redis.vector_en:
+        if CONFIG.redis.search_en:
             query_str = ""
 
             if phase:
@@ -140,7 +146,18 @@ class UWSRedis:
                 jobref.append(ShortJobDescription(**job_obj))
 
         else:
-            pass
+            keys = []
+            for key in self.__redis_client.scan_iter(match=f"{CUTOUT_JOB_PREFIX}:*", count=100):
+                keys.append(key.decode())
+
+            if keys:
+                for i in range(0, len(keys), 100):
+                    batch_keys = keys[i : i + 100]
+                    value = self.__redis_client.json().mget(batch_keys, Path.root_path())
+                    jobref.extend(value)
+
+                jobref.sort(key=lambda job: job["creation_time"], reverse=True)
+                jobref = jobref[:last]
 
         jobs = Jobs(jobref=jobref)
         return jobs
@@ -150,6 +167,12 @@ class UWSRedis:
             job_id=job_id,
             path="$.phase",
             obj=new_phase,
+        )
+
+    async def get_job_result(self, job_id: str):
+        return await self.__redis_client.json().get(
+            f"{CUTOUT_JOB_PREFIX}:{job_id}",
+            "$.results.results",
         )
 
     async def append_job_result(self, job_id: str, result: Any):

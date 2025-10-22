@@ -277,6 +277,22 @@ class CutoutsUWSHandler:
         job_summary = await self.uws_redis.get_job(job_id)
         return job_summary.results
 
+    @uws_router.get("/async/{job_id}/results/results")
+    async def get_job_json_results(
+        self,
+        job_id: Annotated[
+            str,
+            Path(description="Server-assigned job ID for the request"),
+        ],
+    ):
+        """
+        Return job details per UWS spec
+        https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
+        """
+        job_results = await self.uws_redis.get_job_result(job_id)
+        return job_results
+
+
     @uws_router.get("/async/{job_id}/parameters")
     async def get_job_parameters(
         self,
