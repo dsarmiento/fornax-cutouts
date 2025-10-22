@@ -18,7 +18,7 @@ from fornax_cutouts.utils.santa_resolver import resolve_positions
 from fornax_cutouts.utils.uws_redis import uws_redis_client
 
 
-@celery_app.task(pydantic=True)
+@celery_app.task()
 def schedule_job(
     job_id: str,
     position: list[str],
@@ -70,7 +70,7 @@ def schedule_job(
     asyncio.run(task())
 
 
-@celery_app.task(pydantic=True)
+@celery_app.task()
 def all_done(_, job_id: str):
     async def task():
         r = uws_redis_client()
@@ -92,7 +92,7 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
     return filter
 
 
-@celery_app.task(pydantic=True)
+@celery_app.task()
 def generate_cutout(  # noqa: C901
     job_id: str,
     source_file: str | list[str],
@@ -119,7 +119,16 @@ def generate_cutout(  # noqa: C901
         ttl (int, optional): If destination is S3, time to live of the signed url in seconds.
             Defaults to 1 hr.
     """
-    async def task():
+    async def task(
+        job_id,
+        source_file,
+        target,
+        size,
+        output_format,
+        output_dir,
+        colorize,
+        ttl,
+    ):
         if isinstance(size, int):
             size = (size, size)
 
@@ -236,8 +245,19 @@ def generate_cutout(  # noqa: C901
 
         if job_id != "sync":
             r = uws_redis_client()
-            await r.append_job_result(job_id, resp)
+            await r.append_job_result(job_id, resp.model_dump())
 
         return resp
 
-    asyncio.run(task())
+    resp = asyncio.run(task(
+        job_id=job_id,
+        source_file=source_file,
+        target=target,
+        size=size,
+        output_format=output_format,
+        output_dir=output_dir,
+        colorize=colorize,
+        ttl=ttl,
+    ))
+
+    return resp
