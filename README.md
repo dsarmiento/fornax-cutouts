@@ -1,1 +1,1 @@
-# fornax-cutouts
+# Fornax Cutouts
