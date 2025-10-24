@@ -18,7 +18,11 @@ class RedisConfig(BaseModel):
 
 
 class FornaxCutoutsConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="cutouts__", env_nested_delimiter="__")
+    model_config = SettingsConfigDict(
+        env_prefix="cutouts__",
+        env_nested_delimiter="__",
+        env_file=".env",
+    )
 
     redis: RedisConfig = Field(default_factory=RedisConfig)
 

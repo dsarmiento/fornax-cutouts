@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from pprint import pprint
 from typing import Any
 
 from redis import ResponseError
@@ -12,10 +11,10 @@ from redis.commands.json.path import Path
 from redis.commands.search.field import NumericField, TagField
 from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
-from vo_models.uws.models import ExecutionPhase, Jobs, ShortJobDescription
+from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, ShortJobDescription
 
 from fornax_cutouts.config import CONFIG
-from fornax_cutouts.models.cutouts import CutoutJobSummary
+from fornax_cutouts.models.uws import create_job_summary
 
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
 CUTOUT_INDEX_NAME = "cutoutIdx"
@@ -23,11 +22,11 @@ CUTOUT_PREFIX = "cutout"
 CUTOUT_JOB_PREFIX = f"{CUTOUT_PREFIX}:jobs"
 
 
-def uws_redis_client():
-    return UWSRedis()
+def redis_uws_client():
+    return RedisUWS()
 
 
-class UWSRedis:
+class RedisUWS:
     def __init__(self):
         redis_kwargs = {
             "host": CONFIG.redis.host,
@@ -99,22 +98,34 @@ class UWSRedis:
             obj=time.timestamp(),
         )
 
-    async def create_job(self, job: CutoutJobSummary) -> CutoutJobSummary:
-        job_id = job.job_id
+    async def create_job(
+        self,
+        job_id: str,
+        run_id: str | None = None,
+        parameters: dict = {},
+    ):
+        job_obj = {
+            "job_id": job_id,
+            "phase": ExecutionPhase.PENDING,
+        }
+
+        if run_id:
+            job_obj["run_id"] = run_id
+
+        if parameters:
+            job_obj["parameters"] = parameters
 
         await self.__redis_client.json().set(
             name=f"{CUTOUT_JOB_PREFIX}:{job_id}",
             path="$",
-            obj=job.model_dump(),
+            obj=job_obj,
         )
         await self.set_create_time(job_id)
 
-        return await self.get_job(job_id)
-
-    async def get_job(self, job_id: str) -> CutoutJobSummary:
-        job_json = await self.__redis_client.json().get(f"{CUTOUT_JOB_PREFIX}:{job_id}")
-        del job_json["results"]["results"]
-        return CutoutJobSummary(**job_json)
+    async def get_job(self, job_id: str) -> JobSummary:
+        job_json: dict = await self.__redis_client.json().get(f"{CUTOUT_JOB_PREFIX}:{job_id}")
+        job_json.pop("results", None)
+        return create_job_summary(**job_json)
 
     async def get_jobs(
         self,
@@ -172,13 +183,13 @@ class UWSRedis:
     async def get_job_result(self, job_id: str):
         return await self.__redis_client.json().get(
             f"{CUTOUT_JOB_PREFIX}:{job_id}",
-            "$.results.results",
+            "$.results",
         )
 
     async def append_job_result(self, job_id: str, result: Any):
         await self.__redis_client.json().arrappend(
             f"{CUTOUT_JOB_PREFIX}:{job_id}",
-            "$.results.results",
+            "$.results",
             result,
         )
 

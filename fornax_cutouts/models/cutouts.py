@@ -1,19 +1,6 @@
-from datetime import timedelta
-
 from pydantic import BaseModel
-from vo_models.uws.models import NSMAP, JobSummary, MultiValuedParameter, Parameter, Parameters
 
 from fornax_cutouts.models.base import TargetPosition
-
-REQUEST_EXPIRES_IN = timedelta(days=7)
-
-
-class CutoutParameters(Parameters, tag="parameters", ns="uws", nsmap=NSMAP):
-    runid: Parameter = Parameter(value="", id="runid")
-    position: MultiValuedParameter
-
-
-CutoutJobSummary = JobSummary[CutoutParameters]
 
 
 class FilenameLookupResponse(BaseModel):
@@ -21,9 +8,6 @@ class FilenameLookupResponse(BaseModel):
     target: TargetPosition
     filenames: list[str]
     size: int | None = None
-
-
-#######
 
 
 class FileResponse(BaseModel):

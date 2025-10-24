@@ -14,8 +14,8 @@ from fornax_cutouts.constants import CUTOUT_STORAGE_IS_S3, CUTOUT_STORAGE_PREFIX
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse, FileResponse
 from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.utils.redis_uws import redis_uws_client
 from fornax_cutouts.utils.santa_resolver import resolve_positions
-from fornax_cutouts.utils.uws_redis import uws_redis_client
 
 
 @celery_app.task()
@@ -27,7 +27,7 @@ def schedule_job(
     output_format: list[str],
 ):
     async def task():
-        r = uws_redis_client()
+        r = redis_uws_client()
 
         await r.update_job_phase(job_id, ExecutionPhase.QUEUED)
 
@@ -73,7 +73,7 @@ def schedule_job(
 @celery_app.task()
 def all_done(_, job_id: str):
     async def task():
-        r = uws_redis_client()
+        r = redis_uws_client()
 
         await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
         await r.set_end_time(job_id)
@@ -244,7 +244,7 @@ def generate_cutout(  # noqa: C901
         )
 
         if job_id != "sync":
-            r = uws_redis_client()
+            r = redis_uws_client()
             await r.append_job_result(job_id, resp.model_dump())
 
         return resp

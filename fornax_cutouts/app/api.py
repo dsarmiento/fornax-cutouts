@@ -8,14 +8,14 @@ from fastapi import Depends, FastAPI
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from fornax_cutouts.routes.v1 import api_v1
-from fornax_cutouts.utils.uws_redis import UWSRedis, uws_redis_client
+from fornax_cutouts.utils.redis_uws import RedisUWS, redis_uws_client
 
 logger = logging.getLogger("uvicorn")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        r = uws_redis_client()
+        r = redis_uws_client()
         await r._setup_index()
         await r.close()
     except Exception as e:
@@ -31,7 +31,7 @@ main_app.include_router(api_v1, prefix="/api/v0")   # Beta routes, eventually wi
 
 @main_app.get("/api/health")
 async def health_check(
-    r: Annotated[UWSRedis, Depends(uws_redis_client)],
+    r: Annotated[RedisUWS, Depends(redis_uws_client)],
 ):
     status = "ok"
     details = ""
