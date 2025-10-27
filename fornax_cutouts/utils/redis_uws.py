@@ -11,15 +11,14 @@ from redis.commands.json.path import Path
 from redis.commands.search.field import NumericField, TagField
 from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
-from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, ShortJobDescription
+from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, Parameters, ShortJobDescription
 
 from fornax_cutouts.config import CONFIG
-from fornax_cutouts.models.uws import create_job_summary
+from fornax_cutouts.models.uws import create_job_summary, create_parameters
 
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
 CUTOUT_INDEX_NAME = "cutoutIdx"
-CUTOUT_PREFIX = "cutout"
-CUTOUT_JOB_PREFIX = f"{CUTOUT_PREFIX}:jobs"
+CUTOUT_JOB_PREFIX = f"{CONFIG.worker.redis_prefix}:jobs"
 
 
 def redis_uws_client():
@@ -180,7 +179,14 @@ class RedisUWS:
             obj=new_phase,
         )
 
-    async def get_job_result(self, job_id: str):
+    async def get_job_parameters(self, job_id: str) -> Parameters:
+        job_parameters = await self.__redis_client.json().get(
+            f"{CUTOUT_JOB_PREFIX}:{job_id}",
+            "$.parameters",
+        )
+        return create_parameters(**job_parameters[0])
+
+    async def get_job_results(self, job_id: str) -> list:
         return await self.__redis_client.json().get(
             f"{CUTOUT_JOB_PREFIX}:{job_id}",
             "$.results",

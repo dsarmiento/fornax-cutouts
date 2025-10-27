@@ -17,6 +17,10 @@ class RedisConfig(BaseModel):
         return f"redis{'s' if self.use_ssl else ''}://{self.host}:{self.port}/0"
 
 
+class WorkerConfig(BaseModel):
+    redis_prefix: str = "cutouts"
+
+
 class FornaxCutoutsConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="cutouts__",
@@ -25,6 +29,7 @@ class FornaxCutoutsConfig(BaseSettings):
     )
 
     redis: RedisConfig = Field(default_factory=RedisConfig)
+    worker: WorkerConfig = Field(default_factory=WorkerConfig)
 
     sync_ttl: int = 1 * 60 * 60  # 1 Hour
     async_ttl: int = 2 * 7 * 24 * 60 * 60  # 2 Weeks

@@ -24,7 +24,7 @@ def create_parameters(**kwargs) -> Parameters | None:
         else:
             fields[name] = create_parameter(name=name, value=value)
 
-    return create_model("CutoutsDynamicParameters", __base__=Parameters, **fields)
+    return create_model("CutoutsDynamicParameters", __base__=Parameters, **fields)()
 
 def create_job_summary(
     job_id: str,
@@ -32,11 +32,12 @@ def create_job_summary(
     parameters: dict = {},
     **kwargs
 ) -> JobSummary:
-    JobParameters = create_parameters(**parameters)
+    job_parameters = create_parameters(**parameters)
+    JobParameters = type(job_parameters)
 
     return JobSummary[JobParameters](
         job_id=job_id,
         run_id=run_id,
-        parameters=JobParameters(),
+        parameters=job_parameters,
         **kwargs
     )

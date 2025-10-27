@@ -30,7 +30,6 @@ def run_api(
 
 def run_worker():
     """Start Celery worker."""
-    import fornax_cutouts.tasks  # register the tasks
     from fornax_cutouts.app.celery_app import celery_app
 
     celery_app.worker_main([
