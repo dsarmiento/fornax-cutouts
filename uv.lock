@@ -777,6 +777,7 @@ source = { editable = "." }
 dependencies = [
     { name = "astrocut" },
     { name = "celery" },
+    { name = "click" },
     { name = "fastapi", extra = ["standard"] },
     { name = "fastapi-utils" },
     { name = "httpx" },
@@ -799,6 +800,7 @@ dev = [
 requires-dist = [
     { name = "astrocut", specifier = ">=1.1.0" },
     { name = "celery", specifier = ">=5.5.0" },
+    { name = "click", specifier = ">=8.3.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
     { name = "fastapi-utils", specifier = ">=0.8.0" },
     { name = "httpx", specifier = ">=0.28.1" },
