@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from functools import cached_property
 from importlib.util import module_from_spec, spec_from_file_location
 
 from fornax_cutouts.config import CONFIG
@@ -10,7 +11,10 @@ from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
 @dataclass
 class CutoutRegistry:
     _SOURCES: dict[str, AbstractMissionSource] = field(default_factory=dict, init=False)
-    _VALID_SOURCES: list[str] = field(default_factory=list, init=False)
+
+    @cached_property
+    def _VALID_SOURCES(self) -> list[str]:
+        return sorted(self._SOURCES.keys())
 
     def get_mission(self, mission: str) -> AbstractMissionSource:
         try:
@@ -29,8 +33,6 @@ class CutoutRegistry:
     def register_source(self, mission: str):
         def _decorator(cls: AbstractMissionSource) -> AbstractMissionSource:
             self._SOURCES[mission] = cls()
-            self._VALID_SOURCES.append(mission)
-            self._VALID_SOURCES = sorted(self._VALID_SOURCES)
             return cls
 
         return _decorator

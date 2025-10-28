@@ -7,14 +7,13 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Form, HTTPException, Path, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from fastapi_utils.cbv import cbv
-from vo_models.uws.models import Jobs
+from vo_models.uws.models import Jobs, JobSummary, Parameters
 from vo_models.uws.types import ExecutionPhase
 from vo_models.voresource.types import UTCTimestamp
 
-from fornax_cutouts.models.cutouts import CutoutJobSummary
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.tasks import schedule_job
-from fornax_cutouts.utils.uws_redis import UWSRedis, uws_redis_client
+from fornax_cutouts.utils.redis_uws import RedisUWS, redis_uws_client
 
 uws_router = APIRouter(prefix="/cutouts")
 
@@ -27,12 +26,12 @@ class PhaseAction(StrEnum):
 
 
 class XmlResponse(Response):
-    media_type = "text/xml"
+    media_type = "application/xml"
 
 
 @cbv(uws_router)
 class CutoutsUWSHandler:
-    uws_redis: UWSRedis = Depends(uws_redis_client)
+    uws_redis: RedisUWS = Depends(redis_uws_client)
 
     @uws_router.get("/async")
     async def get_jobs(
@@ -83,31 +82,39 @@ class CutoutsUWSHandler:
             ),
         ] = "",
     ):
-        job_summary = CutoutJobSummary(
-            job_id=uuid.uuid4().hex[:8],
-            run_id=run_id,
-            phase=ExecutionPhase.PENDING,
-        )
-        job_summary = await self.uws_redis.create_job(job_summary)
-
         form = await request.form()
         mission_params = {
             mission: json.loads(params)
             for mission, params in form.items()
             if mission in cutout_registry.get_source_names()
         }
+        request_params = {
+            "position": position,
+            "size": size,
+            "output_format": output_format,
+            **mission_params
+        }
+
+        job_id = uuid.uuid4().hex[:8]
+        job_kwargs = {
+            "job_id": job_id,
+            "position": position,
+            "size": size,
+            "output_format": output_format,
+            "mission_params": mission_params,
+        }
+
+        await self.uws_redis.create_job(
+            job_id=job_id,
+            run_id=run_id,
+            parameters=request_params
+        )
 
         schedule_job.apply_async(
-            task_id=f"cutout-{job_summary.job_id}",
-            kwargs={
-                "job_id": job_summary.job_id,
-                "position": position,
-                "size": size,
-                "mission_params": mission_params,
-                "output_format": output_format,
-            },
+            task_id=f"cutout-{job_id}",
+            kwargs=job_kwargs,
         )
-        redirect_url = f"{request.url.path}/{job_summary.job_id}"
+        redirect_url = f"{request.url.path}/{job_id}"
         return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
     @uws_router.get("/async/{job_id}")
@@ -117,7 +124,7 @@ class CutoutsUWSHandler:
             str,
             Path(description="Server-assigned job ID for the request"),
         ],
-    ) -> CutoutJobSummary:
+    ) -> JobSummary:
         try:
             job_summary = await self.uws_redis.get_job(job_id)
             return XmlResponse(job_summary.to_xml())
@@ -289,7 +296,7 @@ class CutoutsUWSHandler:
         Return job details per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
-        job_results = await self.uws_redis.get_job_result(job_id)
+        job_results = await self.uws_redis.get_job_results(job_id)
         return job_results
 
 
@@ -300,13 +307,13 @@ class CutoutsUWSHandler:
             str,
             Path(description="Server-assigned job ID for the request"),
         ],
-    ):
+    ) -> Parameters:
         """
         Return job details per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
-        job_summary = await self.uws_redis.get_job(job_id)
-        return job_summary.parameters
+        job_parameters = await self.uws_redis.get_job_parameters(job_id)
+        return XmlResponse(job_parameters.to_xml())
 
     @uws_router.post("/async{job_id}/parameters")
     def post_job_parameters(

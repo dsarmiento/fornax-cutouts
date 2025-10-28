@@ -21,15 +21,16 @@ celery_app = Celery(
     "fornax-cutouts",
     broker=CONFIG.redis.uri,
     backend=CONFIG.redis.uri,
+    include=["fornax_cutouts.tasks"]
 )
 
 conf_update = {
     # Redis Options
     "broker_transport_options": {
-        "global_keyprefix": "celery:broker:",
+        "global_keyprefix": f"{CONFIG.worker.redis_prefix}:celery:broker:",
     },
     "result_backend_transport_options": {
-        "global_keyprefix": "celery:results:",
+        "global_keyprefix": f"{CONFIG.worker.redis_prefix}:celery:results:",
     },
     "result_expires": 1 * 60 * 60,  # 1 Hour,
 
