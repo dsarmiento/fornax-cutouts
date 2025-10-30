@@ -2,20 +2,10 @@ import ssl
 
 from celery import Celery
 from celery.utils.log import get_task_logger
-from kombu.serialization import register
 
 from fornax_cutouts.config import CONFIG
-from fornax_cutouts.utils.pydantic_serializer import pydantic_dumps, pydantic_loads
 
 logger = get_task_logger("cutouts")
-
-register(
-    "pydantic",
-    pydantic_dumps,
-    pydantic_loads,
-    content_type="application/x-pydantic",
-    content_encoding="utf-8",
-)
 
 celery_app = Celery(
     "fornax-cutouts",
@@ -33,13 +23,6 @@ conf_update = {
         "global_keyprefix": f"{CONFIG.worker.redis_prefix}:celery:results:",
     },
     "result_expires": 1 * 60 * 60,  # 1 Hour,
-
-    # Pydantic serialization
-    "task_serializer": "pydantic",
-    "result_serializer": "pydantic",
-    "event_serializer": "pydantic",
-    "accept_content": ["application/json", "application/x-pydantic"],
-    "result_accept_content": ["application/json", "application/x-pydantic"],
 }
 
 if CONFIG.redis.use_ssl:
