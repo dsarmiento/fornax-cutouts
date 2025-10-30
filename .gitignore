@@ -212,3 +212,6 @@ __marimo__/
 
 # Mac stuff
 .DS_Store
+
+.data/
+scrap.ipynb
