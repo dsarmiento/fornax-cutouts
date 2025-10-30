@@ -209,3 +209,6 @@ __marimo__/
 # Cursor
 .cursor/
 .cursorignore
+
+# Mac stuff
+.DS_Store
