@@ -70,7 +70,7 @@ def schedule_job(
     asyncio.run(task())
 
 
-@celery_app.task()
+@celery_app.task(pydantic=True)
 def all_done(job_results: list[CutoutResponse], job_id: str, batch_num: int = 0) -> None:
     async def task():
         r = redis_uws_client()
