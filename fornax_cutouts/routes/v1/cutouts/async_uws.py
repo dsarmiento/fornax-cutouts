@@ -88,11 +88,31 @@ class CutoutsUWSHandler:
         ] = "",
     ):
         form = await request.form()
-        mission_params = {
-            mission: json.loads(params)
-            for mission, params in form.items()
-            if mission in cutout_registry.get_source_names()
-        }
+
+        mission_params = {}
+        source_names = cutout_registry.get_source_names()
+
+        for key, value in form.multi_items():
+            # Case 1: key is a source name with JSON string value
+            if key in source_names:
+                mission_params[key] = json.loads(value)
+            # Case 2: key is in format "source_name.parameter"
+            elif "." in key:
+                parts = key.split(".", 1)  # Split only on first dot
+                source_name = parts[0]
+                param_name = parts[1]
+
+                if source_name in source_names:
+                    if source_name not in mission_params:
+                        mission_params[source_name] = {}
+
+                    if param_name not in mission_params[source_name]:
+                        mission_params[source_name][param_name] = value
+                    elif not isinstance(mission_params[source_name][param_name], list):
+                        mission_params[source_name][param_name] = [mission_params[source_name][param_name], value]
+                    else:
+                        mission_params[source_name][param_name].append(value)
+
         request_params = {
             "position": position,
             "size": size,
@@ -173,7 +193,7 @@ class CutoutsUWSHandler:
         job_summary = await self.uws_redis.get_job(job_id)
         return job_summary.phase
 
-    @uws_router.post("/async{job_id}/phase")
+    @uws_router.post("/async/{job_id}/phase")
     def post_job_phase(
         self,
         job_id: Annotated[
@@ -221,7 +241,7 @@ class CutoutsUWSHandler:
         """
         return
 
-    @uws_router.post("/async{job_id}/destruction")
+    @uws_router.post("/async/{job_id}/destruction")
     def post_job_destruction(
         self,
         job_id: Annotated[
@@ -359,7 +379,7 @@ class CutoutsUWSHandler:
         job_parameters = await self.uws_redis.get_job_parameters(job_id)
         return XmlResponse(job_parameters.to_xml())
 
-    @uws_router.post("/async{job_id}/parameters")
+    @uws_router.post("/async/{job_id}/parameters")
     def post_job_parameters(
         self,
         job_id: Annotated[
