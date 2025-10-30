@@ -2,6 +2,9 @@ from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
 
+from fornax_cutouts.models.base import Positions, TargetPosition
+from fornax_cutouts.models.cutouts import CutoutRequest
+
 
 class MissionMetadata(BaseModel):
     name: str
@@ -34,8 +37,7 @@ class AbstractMissionSource(ABC):
     @abstractmethod
     def get_filenames(
         self,
-        ra: float,
-        dec: float,
+        positions: TargetPosition | Positions,
         filters: list[str],
         *args,
         **kwargs,

@@ -92,7 +92,7 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
     return filter
 
 
-@celery_app.task()
+@celery_app.task(pydantic=True)
 def generate_cutout(  # noqa: C901
     job_id: str,
     source_file: str | list[str],
@@ -221,31 +221,16 @@ def generate_cutout(  # noqa: C901
             if img_url:
                 img_url = img_url.replace(CUTOUT_STORAGE_PREFIX, "")
 
-        fits = None
-        if fits_url:
-            fits = FileResponse(
-                filename=fits_fname.replace(temp_output_dir, ""),
-                url=fits_url,
-            )
-
-        preview = None
-        if img_url:
-            preview = FileResponse(
-                filename=img_fname.replace(temp_output_dir, ""),
-                url=img_url,
-            )
 
         resp = CutoutResponse(
-            fits=fits,
-            preview=preview,
+            mission="todo",
             position=target,
             size_px=size,
             filter=filter,
+            fits=fits_url,
+            preview=img_url,
+            mission_extras={},
         )
-
-        if job_id != "sync":
-            r = redis_uws_client()
-            await r.append_job_result(job_id, resp.model_dump())
 
         return resp
 

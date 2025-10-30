@@ -10,20 +10,18 @@ class FilenameLookupResponse(BaseModel):
     size: int | None = None
 
 
-class FileResponse(BaseModel):
-    filename: str
-    url: str
-
-
 class ColorFilter(BaseModel):
     red: str | None
     green: str | None
     blue: str | None
 
-
-class CutoutResponse(BaseModel):
+class CutoutRequest(BaseModel):
+    mission: str
     position: TargetPosition
     size_px: tuple[int, int]
-    fits: FileResponse | None = None
-    preview: FileResponse | None = None
     filter: str | ColorFilter | None = None
+    mission_extras: dict | None = None
+
+class CutoutResponse(CutoutRequest):
+    fits: str | None = None
+    preview: str | None = None
