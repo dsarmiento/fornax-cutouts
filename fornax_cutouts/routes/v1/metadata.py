@@ -73,7 +73,7 @@ class MetadataHandler:
                 k: v for k, v in fname_request.model_dump().items() if v is not None and k != "position"
             }
         }
-        print(mission_params)
+
         fnames = cutout_registry.get_target_filenames(
             position=resolve_positions(fname_request.position),
             mission_params=mission_params,
