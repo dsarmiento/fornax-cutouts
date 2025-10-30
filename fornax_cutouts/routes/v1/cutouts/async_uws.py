@@ -93,7 +93,12 @@ class CutoutsUWSHandler:
             for mission, params in form.items()
             if mission in cutout_registry.get_source_names()
         }
-        request_params = {"position": position, "size": size, "output_format": output_format, **mission_params}
+        request_params = {
+            "position": position,
+            "size": size,
+            "output_format": output_format,
+            **mission_params,
+        }
 
         job_id = uuid.uuid4().hex[:8]
         job_kwargs = {
@@ -104,7 +109,11 @@ class CutoutsUWSHandler:
             "mission_params": mission_params,
         }
 
-        await self.uws_redis.create_job(job_id=job_id, run_id=run_id, parameters=request_params)
+        await self.uws_redis.create_job(
+            job_id=job_id,
+            run_id=run_id,
+            parameters=request_params,
+        )
 
         schedule_job.apply_async(
             task_id=f"cutout-{job_id}",
