@@ -12,7 +12,7 @@ from fornax_cutouts.app.celery_app import celery_app, logger
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.constants import CUTOUT_STORAGE_IS_S3, CUTOUT_STORAGE_PREFIX
 from fornax_cutouts.models.base import TargetPosition
-from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse, FileResponse
+from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.redis_uws import redis_uws_client
 from fornax_cutouts.utils.santa_resolver import resolve_positions
@@ -71,10 +71,10 @@ def schedule_job(
 
 
 @celery_app.task()
-def all_done(_, job_id: str):
+def all_done(job_results: list[CutoutResponse], job_id: str, batch_num: int = 0) -> None:
     async def task():
         r = redis_uws_client()
-
+        r.append_job_cutout_result(job_id, job_results, batch_num)
         await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
         await r.set_end_time(job_id)
 
@@ -119,6 +119,7 @@ def generate_cutout(  # noqa: C901
         ttl (int, optional): If destination is S3, time to live of the signed url in seconds.
             Defaults to 1 hr.
     """
+
     async def task(
         job_id,
         source_file,
@@ -133,7 +134,9 @@ def generate_cutout(  # noqa: C901
             size = (size, size)
 
         if colorize:
-            assert isinstance(source_file, list) and len(source_file) == 3, "Color image must have exactly 3 source images"
+            assert isinstance(source_file, list) and len(source_file) == 3, (
+                "Color image must have exactly 3 source images"
+            )
 
         else:
             if isinstance(source_file, str):
@@ -221,7 +224,6 @@ def generate_cutout(  # noqa: C901
             if img_url:
                 img_url = img_url.replace(CUTOUT_STORAGE_PREFIX, "")
 
-
         resp = CutoutResponse(
             mission="todo",
             position=target,
@@ -234,15 +236,17 @@ def generate_cutout(  # noqa: C901
 
         return resp
 
-    resp = asyncio.run(task(
-        job_id=job_id,
-        source_file=source_file,
-        target=target,
-        size=size,
-        output_format=output_format,
-        output_dir=output_dir,
-        colorize=colorize,
-        ttl=ttl,
-    ))
+    resp = asyncio.run(
+        task(
+            job_id=job_id,
+            source_file=source_file,
+            target=target,
+            size=size,
+            output_format=output_format,
+            output_dir=output_dir,
+            colorize=colorize,
+            ttl=ttl,
+        )
+    )
 
     return resp

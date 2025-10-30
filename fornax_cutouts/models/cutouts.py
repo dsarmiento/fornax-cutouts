@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+import json
+
+from pydantic import BaseModel, field_serializer
 
 from fornax_cutouts.models.base import TargetPosition
 
@@ -15,12 +17,20 @@ class ColorFilter(BaseModel):
     green: str | None
     blue: str | None
 
+
 class CutoutRequest(BaseModel):
     mission: str
     position: TargetPosition
     size_px: tuple[int, int]
     filter: str | ColorFilter | None = None
     mission_extras: dict | None = None
+
+    @field_serializer("mission_extras")
+    def serialize_mission_extras(self, value: dict | None) -> str | None:
+        if value is None:
+            return None
+        return json.dumps(value)
+
 
 class CutoutResponse(CutoutRequest):
     fits: str | None = None

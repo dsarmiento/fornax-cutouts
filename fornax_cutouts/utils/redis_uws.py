@@ -13,11 +13,13 @@ from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, Parameters, ShortJobDescription
 
+from fornax_cutouts.async_results import AsyncCutoutResults
 from fornax_cutouts.config import CONFIG
+from fornax_cutouts.models.cutouts import CutoutResponse
 from fornax_cutouts.models.uws import create_job_summary, create_parameters
 
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
-CUTOUT_INDEX_NAME = "cutoutIdx"
+CUTOUT_INDEX_NAME = "cutoutJobsIdx"
 CUTOUT_JOB_PREFIX = f"{CONFIG.worker.redis_prefix}:jobs"
 
 
@@ -186,18 +188,12 @@ class RedisUWS:
         )
         return create_parameters(**job_parameters[0])
 
-    async def get_job_results(self, job_id: str) -> list:
-        return await self.__redis_client.json().get(
-            f"{CUTOUT_JOB_PREFIX}:{job_id}",
-            "$.results",
-        )
+    def get_job_cutout_results(self, job_id: str) -> AsyncCutoutResults:
+        return AsyncCutoutResults(job_id=job_id)
 
-    async def append_job_result(self, job_id: str, result: Any):
-        await self.__redis_client.json().arrappend(
-            f"{CUTOUT_JOB_PREFIX}:{job_id}",
-            "$.results",
-            result,
-        )
+    def append_job_cutout_result(self, job_id: str, job_results: list[CutoutResponse], batch_num: int):
+        results = self.get_job_cutout_results(job_id)
+        results.add_results(job_results, batch_num)
 
     async def set_quote(self, job_id: str, quote: datetime):
         await self.__set_time(job_id=job_id, time_field="quote", time=quote)

@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 
 import duckdb
@@ -10,7 +10,7 @@ from astropy.io import votable
 from astropy.table import Table as AstroTable
 from fsspec import AbstractFileSystem, filesystem
 
-from fornax_cutouts.constants import DEPLOYMENT_TYPE
+from fornax_cutouts.constants import CUTOUT_STORAGE_PREFIX, DEPLOYMENT_TYPE
 
 # This will need to move to another module
 AWS_S3_REGION = os.getenv("AWS_S3_REGION")
@@ -32,9 +32,10 @@ if DEPLOYMENT_TYPE == "aws":
 @dataclass
 class AsyncCutoutResults:
     job_id: str
-    results_dir: str
+    results_dir: str = field(init=False)
 
     def __post_init__(self):
+        self.results_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{self.job_id}/results/"
         self.__duckdb_conn = duckdb.connect()
         self.__fs: AbstractFileSystem = filesystem("local")
 
@@ -56,13 +57,13 @@ class AsyncCutoutResults:
         with self.__fs.open(results_fname, "wb") as fp:
             pq.write_table(results_t, fp)
 
-    def get_results(self, page: int, size: int) -> pd.DataFrame:
+    def __get_results(self, page: int, size: int) -> pd.DataFrame:
         results_db = self.__duckdb_conn.read_parquet(f"{self.results_dir}/results_*.parquet")
         curr_results = results_db.limit(size, offset=page*size)
         return curr_results.to_df()
 
     def to_votable(self, page: int = 0, size: int = 100) -> str:
-        df = self.get_results(page, size)
+        df = self.__get_results(page, size)
         astro_t = AstroTable.from_pandas(df)
         vo_t = votable.from_table(astro_t)
         vo_io = BytesIO()
@@ -70,9 +71,9 @@ class AsyncCutoutResults:
         return vo_io.getvalue().decode()
 
     def to_json(self, page: int = 0, size: int = 100) -> str:
-        df = self.get_results(page, size)
+        df = self.__get_results(page, size)
         return df.to_json(orient='records')
 
     def to_csv(self, page: int = 0, size: int = 100) -> str:
-        df = self.get_results(page, size)
+        df = self.__get_results(page, size)
         return df.to_csv(index=False)

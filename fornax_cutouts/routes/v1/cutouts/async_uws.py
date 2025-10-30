@@ -5,11 +5,12 @@ from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Path, Query, Request, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi_utils.cbv import cbv
-from vo_models.uws.models import Jobs, JobSummary, Parameters
+from vo_models.uws.models import Jobs, JobSummary, Parameters, ResultReference, Results
 from vo_models.uws.types import ExecutionPhase
 from vo_models.voresource.types import UTCTimestamp
+from vo_models.xlink import XlinkType
 
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.tasks import schedule_job
@@ -27,6 +28,10 @@ class PhaseAction(StrEnum):
 
 class XmlResponse(Response):
     media_type = "application/xml"
+
+
+class CsvResponse(Response):
+    media_type = "text/csv"
 
 
 @cbv(uws_router)
@@ -88,12 +93,7 @@ class CutoutsUWSHandler:
             for mission, params in form.items()
             if mission in cutout_registry.get_source_names()
         }
-        request_params = {
-            "position": position,
-            "size": size,
-            "output_format": output_format,
-            **mission_params
-        }
+        request_params = {"position": position, "size": size, "output_format": output_format, **mission_params}
 
         job_id = uuid.uuid4().hex[:8]
         job_kwargs = {
@@ -104,11 +104,7 @@ class CutoutsUWSHandler:
             "mission_params": mission_params,
         }
 
-        await self.uws_redis.create_job(
-            job_id=job_id,
-            run_id=run_id,
-            parameters=request_params
-        )
+        await self.uws_redis.create_job(job_id=job_id, run_id=run_id, parameters=request_params)
 
         schedule_job.apply_async(
             task_id=f"cutout-{job_id}",
@@ -281,24 +277,63 @@ class CutoutsUWSHandler:
         Return job details per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
-        job_summary = await self.uws_redis.get_job(job_id)
-        return job_summary.results
+        results = Results(
+            results=[
+                ResultReference(
+                    id="summary",
+                    type=XlinkType.SIMPLE,
+                    href=f"/api/v0/cutouts/async/{job_id}/results/summary",
+                    size=100,
+                    mime_type="application/xml",
+                    # any_attrs={
+                    #     "output_format": "xml",
+                    #     "page": "0",
+                    #     "size": "100",
+                    # }
+                )
+            ]
+        )
+        return XmlResponse(results.to_xml())
 
-    @uws_router.get("/async/{job_id}/results/results")
+    @uws_router.get("/async/{job_id}/results/summary")
     async def get_job_json_results(
         self,
         job_id: Annotated[
             str,
             Path(description="Server-assigned job ID for the request"),
         ],
+        output_format: Annotated[
+            str,
+            Query(description="Output format to return", choices=["json", "csv", "votable", "xml"]),
+        ] = "xml",
+        page: Annotated[
+            int,
+            Query(description="Page number to return", ge=0),
+        ] = 0,
+        size: Annotated[
+            int,
+            Query(description="Number of results per page", ge=1),
+        ] = 100,
     ):
         """
         Return job details per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
-        job_results = await self.uws_redis.get_job_results(job_id)
-        return job_results
+        job_results = self.uws_redis.get_job_cutout_results(job_id)
 
+        if output_format == "json":
+            return JSONResponse(job_results.to_json(page=page, size=size))
+
+        if output_format == "csv":
+            return CsvResponse(job_results.to_csv(page=page, size=size))
+
+        if output_format in ["votable", "xml"]:
+            return XmlResponse(job_results.to_votable(page=page, size=size))
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid output format: {output_format}",
+        )
 
     @uws_router.get("/async/{job_id}/parameters")
     async def get_job_parameters(
