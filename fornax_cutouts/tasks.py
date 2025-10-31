@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 import astrocut
 from astropy.io.fits.hdu.hdulist import HDUList
-from celery import chord
+from celery import Task, chord
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
@@ -18,8 +18,9 @@ from fornax_cutouts.utils.redis_uws import redis_uws_client
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 
-@celery_app.task()
+@celery_app.task(bind=True, ignore_result=True)
 def schedule_job(
+    self: Task,
     job_id: str,
     position: list[str],
     size: int,
@@ -50,10 +51,10 @@ def schedule_job(
 
         jobs = []
         for target_fname in target_fnames:
-            for fname in target_fname.filenames:
+            for filename_obj in target_fname.filenames:
                 job = generate_cutout.s(
                     job_id=job_id,
-                    source_file=fname,
+                    source_file=filename_obj.filename,
                     target=target_fname.target,
                     size=size,
                     output_format=output_format,
@@ -70,8 +71,8 @@ def schedule_job(
     asyncio.run(task())
 
 
-@celery_app.task(pydantic=True)
-def all_done(job_results: list[CutoutResponse], job_id: str, batch_num: int = 0) -> None:
+@celery_app.task(bind=True, pydantic=True, ignore_result=True)
+def all_done(self: Task, job_results: list[CutoutResponse], job_id: str, batch_num: int = 0) -> None:
     async def task():
         r = redis_uws_client()
         r.append_job_cutout_result(job_id, job_results, batch_num)
@@ -79,6 +80,12 @@ def all_done(job_results: list[CutoutResponse], job_id: str, batch_num: int = 0)
         await r.set_end_time(job_id)
 
     asyncio.run(task())
+
+    if hasattr(self.request, 'chord') and self.request.chord:
+        from celery.result import AsyncResult
+        # Forget each task result to free up backend storage
+        for task_id in self.request.chord:
+            AsyncResult(task_id, app=celery_app).forget()
 
 
 def get_fits_filter(fits_cutout: HDUList) -> str | None:
@@ -92,8 +99,9 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
     return filter
 
 
-@celery_app.task(pydantic=True)
+@celery_app.task(bind=True, pydantic=True)
 def generate_cutout(  # noqa: C901
+    self: Task,
     job_id: str,
     source_file: str | list[str],
     target: TargetPosition,

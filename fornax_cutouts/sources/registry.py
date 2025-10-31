@@ -4,7 +4,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import Positions
-from fornax_cutouts.models.cutouts import FilenameLookupResponse
+from fornax_cutouts.models.cutouts import FilenameLookupResponse, FilenameWithMetadata
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
 
 
@@ -72,20 +72,32 @@ class CutoutRegistry:
         position: Positions,
         mission_params: dict[str, dict],
         size: int | None = None,
+        include_metadata: bool = True,
     ) -> list[FilenameLookupResponse]:
         ret = []
 
         # TODO: This can be parallelized with async or something, not needed currently with only ps1
         for target in position:
             for mission, params in mission_params.items():
-                fnames = self._SOURCES[mission].get_filenames(position=target, **params)
+                fnames_result = self._SOURCES[mission].get_filenames(
+                    position=target,
+                    include_metadata=include_metadata,
+                    **params,
+                )
 
-                if fnames:
+                if include_metadata:
+                    filenames = [
+                        FilenameWithMetadata(filename=fname, metadata=meta)
+                        for fname, meta in fnames_result
+                    ]
+                else:
+                    filenames = [FilenameWithMetadata(filename=fname) for fname in fnames_result]
+
                     ret.append(
                         FilenameLookupResponse(
                             mission=mission,
                             target=target,
-                            filenames=fnames,
+                            filenames=filenames,
                             size=params["size"] if "size" in params else size,
                         )
                     )

@@ -5,10 +5,15 @@ from pydantic import BaseModel, field_serializer
 from fornax_cutouts.models.base import TargetPosition
 
 
+class FilenameWithMetadata(BaseModel):
+    filename: str
+    metadata: dict | None = None  # Mission-specific metadata for this file
+
+
 class FilenameLookupResponse(BaseModel):
     mission: str
     target: TargetPosition
-    filenames: list[str]
+    filenames: list[FilenameWithMetadata]
     size: int | None = None
 
 
