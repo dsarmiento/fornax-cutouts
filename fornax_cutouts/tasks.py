@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 import astrocut
 from astropy.io.fits.hdu.hdulist import HDUList
-from celery import Task, chain, chord
+from celery import Task, chain, group
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
@@ -53,7 +53,7 @@ def schedule_job(
         jobs = []
         for target_fname in target_fnames:
             for filename_obj in target_fname.filenames:
-                job = generate_cutout.s(
+                job = generate_cutout.si(
                     job_id=job_id,
                     source_file=filename_obj.filename,
                     target=target_fname.target,
@@ -61,6 +61,8 @@ def schedule_job(
                     output_format=output_format,
                     output_dir=target_fname.mission,
                     ttl=CONFIG.async_ttl,
+                    mission=target_fname.mission,
+                    metadata=filename_obj.metadata,
                 )
                 jobs.append(job)
 
@@ -84,13 +86,11 @@ def schedule_job(
             end_idx = min(start_idx + batch_size, len(jobs))
             batch_jobs = jobs[start_idx:end_idx]
 
-            batch_chord = chord(batch_jobs)(
-                batch_done.s(job_id=job_id, batch_num=batch_num, total_batches=total_batches)
-            )
+            batch_chord = group(batch_jobs) | batch_done.s(job_id=job_id, batch_num=batch_num, total_batches=total_batches)
             batch_chords.append(batch_chord)
 
         # Chain all batch chords sequentially
-        chain(*batch_chords).apply_async()
+        chain(*batch_chords).delay()
 
     asyncio.run(task())
 
@@ -143,6 +143,8 @@ def generate_cutout(  # noqa: C901
     output_dir: str = "",
     colorize: bool = False,
     ttl: int = CONFIG.sync_ttl,
+    mission: str = "",
+    metadata: dict | None = None,
 ) -> CutoutResponse:
     """
     Generate a cutout within the specific source file
@@ -159,6 +161,10 @@ def generate_cutout(  # noqa: C901
             Defaults to False.
         ttl (int, optional): If destination is S3, time to live of the signed url in seconds.
             Defaults to 1 hr.
+        mission (str, optional): The mission name (e.g., "ps1").
+            Defaults to "".
+        metadata (dict | None, optional): Mission-specific metadata dictionary.
+            Defaults to None.
     """
 
     async def task(
@@ -170,6 +176,8 @@ def generate_cutout(  # noqa: C901
         output_dir,
         colorize,
         ttl,
+        mission,
+        metadata,
     ):
         if isinstance(size, int):
             size = (size, size)
@@ -193,13 +201,15 @@ def generate_cutout(  # noqa: C901
             single_outfile=False,
         )
 
-        filter: str | ColorFilter | None = None
-        if colorize:
-            filter = ColorFilter(
-                red=get_fits_filter(cutout.fits_cutouts[0]),
-                green=get_fits_filter(cutout.fits_cutouts[1]),
-                blue=get_fits_filter(cutout.fits_cutouts[2]),
-            )
+        filter: str | ColorFilter
+        if metadata is not None and "filter" in metadata:
+            filter = metadata.pop("filter")
+        elif colorize:
+                filter = ColorFilter(
+                    red=get_fits_filter(cutout.fits_cutouts[0]),
+                    green=get_fits_filter(cutout.fits_cutouts[1]),
+                    blue=get_fits_filter(cutout.fits_cutouts[2]),
+                )
         else:
             filter = get_fits_filter(cutout.fits_cutouts[0])
 
@@ -266,13 +276,13 @@ def generate_cutout(  # noqa: C901
                 img_url = img_url.replace(CUTOUT_STORAGE_PREFIX, "")
 
         resp = CutoutResponse(
-            mission="todo",
+            mission=mission,
             position=target,
             size_px=size,
             filter=filter,
             fits=fits_url,
             preview=img_url,
-            mission_extras={},
+            mission_extras=metadata or {},
         )
 
         return resp
@@ -287,6 +297,8 @@ def generate_cutout(  # noqa: C901
             output_dir=output_dir,
             colorize=colorize,
             ttl=ttl,
+            mission=mission,
+            metadata=metadata,
         )
     )
 
