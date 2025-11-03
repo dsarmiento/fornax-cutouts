@@ -136,7 +136,7 @@ class CutoutsUWSHandler:
         )
 
         schedule_job.apply_async(
-            task_id=f"cutout-{job_id}",
+            task_id=f"schedule_job-{job_id}",
             kwargs=job_kwargs,
         )
         redirect_url = f"{request.url.path}/{job_id}"

@@ -86,7 +86,17 @@ def schedule_job(
             end_idx = min(start_idx + batch_size, len(jobs))
             batch_jobs = jobs[start_idx:end_idx]
 
-            batch_chord = group(batch_jobs) | batch_done.s(job_id=job_id, batch_num=batch_num, total_batches=total_batches)
+            # Assign custom task IDs to each job in the batch
+            for batch_idx, job in enumerate(batch_jobs):
+                task_id = f"generate_cutout-{job_id}-{batch_num}-{batch_idx}"
+                job.set(task_id=task_id)
+
+            # Assign custom task ID to batch_done
+            batch_done_task = batch_done.s(job_id=job_id, batch_num=batch_num, total_batches=total_batches)
+            batch_done_task_id = f"batch_done-{job_id}-{batch_num}"
+            batch_done_task.set(task_id=batch_done_task_id)
+
+            batch_chord = group(batch_jobs) | batch_done_task
             batch_chords.append(batch_chord)
 
         # Chain all batch chords sequentially
@@ -95,7 +105,7 @@ def schedule_job(
     asyncio.run(task())
 
 
-@celery_app.task(bind=True, pydantic=True, ignore_result=True)
+@celery_app.task(bind=True, pydantic=True)
 def batch_done(
     self: Task,
     job_results: list[CutoutResponse],
