@@ -19,6 +19,7 @@ class RedisConfig(BaseModel):
 
 class WorkerConfig(BaseModel):
     redis_prefix: str = "cutouts"
+    batch_size: int = 100
 
 
 class FornaxCutoutsConfig(BaseSettings):

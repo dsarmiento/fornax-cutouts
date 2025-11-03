@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 import astrocut
 from astropy.io.fits.hdu.hdulist import HDUList
-from celery import Task, chord
+from celery import Task, chain, chord
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
@@ -67,18 +67,50 @@ def schedule_job(
         await r.update_job_phase(job_id, ExecutionPhase.EXECUTING)
         await r.set_start_time(job_id)
 
-        chord(jobs)(all_done.s(job_id=job_id))
+        # Split jobs into batches
+        batch_size = CONFIG.worker.batch_size
+        total_batches = (len(jobs) + batch_size - 1) // batch_size  # Ceiling division
+
+        if total_batches == 0:
+            # No jobs to process, complete immediately
+            await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
+            await r.set_end_time(job_id)
+            return
+
+        # Create chords for each batch
+        batch_chords = []
+        for batch_num in range(total_batches):
+            start_idx = batch_num * batch_size
+            end_idx = min(start_idx + batch_size, len(jobs))
+            batch_jobs = jobs[start_idx:end_idx]
+
+            batch_chord = chord(batch_jobs)(
+                batch_done.s(job_id=job_id, batch_num=batch_num, total_batches=total_batches)
+            )
+            batch_chords.append(batch_chord)
+
+        # Chain all batch chords sequentially
+        chain(*batch_chords).apply_async()
 
     asyncio.run(task())
 
 
 @celery_app.task(bind=True, pydantic=True, ignore_result=True)
-def all_done(self: Task, job_results: list[CutoutResponse], job_id: str, batch_num: int = 0) -> None:
+def batch_done(
+    self: Task,
+    job_results: list[CutoutResponse],
+    job_id: str,
+    batch_num: int,
+    total_batches: int,
+) -> None:
     async def task():
         r = redis_uws_client()
         r.append_job_cutout_result(job_id, job_results, batch_num)
-        await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
-        await r.set_end_time(job_id)
+
+        is_last_batch = batch_num == total_batches - 1
+        if is_last_batch:
+            await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
+            await r.set_end_time(job_id)
 
     asyncio.run(task())
 
