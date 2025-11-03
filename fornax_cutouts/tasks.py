@@ -47,6 +47,7 @@ def schedule_job(
             position=resolved_position,
             mission_params=mission_params,
             size=size,
+            include_metadata=True,
         )
 
         jobs = []

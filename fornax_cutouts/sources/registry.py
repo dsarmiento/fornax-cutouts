@@ -93,13 +93,13 @@ class CutoutRegistry:
                 else:
                     filenames = [FilenameWithMetadata(filename=fname) for fname in fnames_result]
 
-                    ret.append(
-                        FilenameLookupResponse(
-                            mission=mission,
-                            target=target,
-                            filenames=filenames,
-                            size=params["size"] if "size" in params else size,
-                        )
+                ret.append(
+                    FilenameLookupResponse(
+                        mission=mission,
+                        target=target,
+                        filenames=filenames,
+                        size=params["size"] if "size" in params else size,
                     )
+                )
 
         return ret
