@@ -351,7 +351,7 @@ class CutoutsUWSHandler:
         job_results = self.uws_redis.get_job_cutout_results(job_id)
 
         if output_format == "json":
-            return JSONResponse(job_results.to_json(page=page, size=size))
+            return job_results.to_py(page=page, size=size)
 
         if output_format == "csv":
             return CsvResponse(job_results.to_csv(page=page, size=size))

@@ -108,14 +108,16 @@ def schedule_job(
 @celery_app.task(bind=True, pydantic=True)
 def batch_done(
     self: Task,
-    job_results: list[CutoutResponse],
+    job_results: list[dict],
     job_id: str,
     batch_num: int,
     total_batches: int,
 ) -> None:
     async def task():
+        cutout_results = [CutoutResponse.model_validate(result) for result in job_results]
+
         r = redis_uws_client()
-        r.append_job_cutout_result(job_id, job_results, batch_num)
+        r.append_job_cutout_result(job_id, cutout_results, batch_num)
 
         is_last_batch = batch_num == total_batches - 1
         if is_last_batch:
@@ -124,8 +126,9 @@ def batch_done(
 
     asyncio.run(task())
 
-    if hasattr(self.request, 'chord') and self.request.chord:
+    if hasattr(self.request, "chord") and self.request.chord:
         from celery.result import AsyncResult
+
         # Forget each task result to free up backend storage
         for task_id in self.request.chord:
             AsyncResult(task_id, app=celery_app).forget()
@@ -215,11 +218,11 @@ def generate_cutout(  # noqa: C901
         if metadata is not None and "filter" in metadata:
             filter = metadata.pop("filter")
         elif colorize:
-                filter = ColorFilter(
-                    red=get_fits_filter(cutout.fits_cutouts[0]),
-                    green=get_fits_filter(cutout.fits_cutouts[1]),
-                    blue=get_fits_filter(cutout.fits_cutouts[2]),
-                )
+            filter = ColorFilter(
+                red=get_fits_filter(cutout.fits_cutouts[0]),
+                green=get_fits_filter(cutout.fits_cutouts[1]),
+                blue=get_fits_filter(cutout.fits_cutouts[2]),
+            )
         else:
             filter = get_fits_filter(cutout.fits_cutouts[0])
 
