@@ -37,7 +37,7 @@ class AsyncCutoutResults:
     results_dir: str = field(init=False)
 
     def __post_init__(self):
-        self.results_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{self.job_id}/results/"
+        self.results_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{self.job_id}/results"
         self.__duckdb_conn = duckdb.connect()
         self.__fs: AbstractFileSystem = filesystem("local")
 
