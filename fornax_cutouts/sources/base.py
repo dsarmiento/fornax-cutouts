@@ -59,5 +59,6 @@ class AbstractMissionSource(ABC):
         positions: TargetPosition | Positions,
         filters: str |list[str],
         *args,
+        include_metadata: bool = False,
         **kwargs,
-    ) -> list[str]: ...
+    ) -> list[str] | list[tuple[str, dict]]: ...

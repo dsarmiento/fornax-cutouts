@@ -1,3 +1,4 @@
+import json
 import os
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -11,6 +12,7 @@ from astropy.table import Table as AstroTable
 from fsspec import AbstractFileSystem, filesystem
 
 from fornax_cutouts.constants import CUTOUT_STORAGE_PREFIX, DEPLOYMENT_TYPE
+from fornax_cutouts.models.cutouts import CutoutResponse
 
 # This will need to move to another module
 AWS_S3_REGION = os.getenv("AWS_S3_REGION")
@@ -48,19 +50,78 @@ class AsyncCutoutResults:
         if not self.__fs.isdir(self.results_dir):
             self.__fs.mkdir(self.results_dir)
 
-    def add_results(self, results: list, batch_num: int):
+    def __write_results_file(self, results: list[CutoutResponse], batch_num: int):
         results_fname = f"{self.results_dir}/results_{batch_num}.parquet"
         if self.__fs.exists(results_fname):
             raise FileExistsError("Results file already exists, not overwriting")
         self.__fs.touch(results_fname)
-        results_t = pa.Table.from_pylist(results)
-        with self.__fs.open(results_fname, "wb") as fp:
-            pq.write_table(results_t, fp)
+
+        results_py = [
+            {
+                "mission": r.mission,
+                "position": r.position,
+                "size_px": r.size_px,
+                "filter": r.filter,
+                "mission_extras": json.dumps(r.mission_extras),
+                "fits": r.fits,
+                "preview": r.preview,
+            }
+            for r in results
+        ]
+        results_t = pa.Table.from_pylist(
+            results_py,
+            schema=pa.schema(
+                [
+                    pa.field("mission", pa.string()),
+                    pa.field("position", pa.list_(pa.float64())),
+                    pa.field("size_px", pa.list_(pa.int64())),
+                    pa.field("filter", pa.string()),
+                    pa.field("mission_extras", pa.string()),
+                    pa.field("fits", pa.string()),
+                    pa.field("preview", pa.string()),
+                ]
+            ),
+        )
+
+        with self.__fs.open(results_fname, "wb") as f:
+            pq.write_table(results_t, f)
+
+    def __update_size_file(self, new_count: int):
+        size_path = f"{self.results_dir}/size"
+        size_count = 0
+        if self.__fs.exists(size_path):
+            with self.__fs.open(size_path, "r") as f:
+                existing = f.read()
+            try:
+                size_count = int(existing.strip())
+            except Exception as e:
+                print(f"Error updating size file: {e}")
+                size_count = 0
+
+        size_count += new_count
+        with self.__fs.open(size_path, "w") as f:
+            f.write(str(size_count))
+
+    def add_results(self, results: list[CutoutResponse], batch_num: int):
+        self.__update_size_file(len(results))
+        self.__write_results_file(results, batch_num)
 
     def __get_results(self, page: int, size: int) -> pd.DataFrame:
-        results_db = self.__duckdb_conn.read_parquet(f"{self.results_dir}/results_*.parquet")
-        curr_results = results_db.limit(size, offset=page*size)
-        return curr_results.to_df()
+        try:
+            results_db = self.__duckdb_conn.read_parquet(f"{self.results_dir}/results_*.parquet")
+            curr_results = results_db.limit(size, offset=page * size)
+            return curr_results.to_df()
+        except duckdb.IOException as e:
+            print(f"Error getting results: {e}")
+            return pd.DataFrame()
+
+    def to_py(self, page: int = 0, size: int = 100) -> list[CutoutResponse]:
+        df = self.__get_results(page, size)
+        return [CutoutResponse.model_validate(row.to_dict()) for _, row in df.iterrows()]
+
+    def to_csv(self, page: int = 0, size: int = 100) -> str:
+        df = self.__get_results(page, size)
+        return df.to_csv(index=False)
 
     def to_votable(self, page: int = 0, size: int = 100) -> str:
         df = self.__get_results(page, size)
@@ -69,11 +130,3 @@ class AsyncCutoutResults:
         vo_io = BytesIO()
         vo_t.to_xml(vo_io)
         return vo_io.getvalue().decode()
-
-    def to_json(self, page: int = 0, size: int = 100) -> str:
-        df = self.__get_results(page, size)
-        return df.to_json(orient='records')
-
-    def to_csv(self, page: int = 0, size: int = 100) -> str:
-        df = self.__get_results(page, size)
-        return df.to_csv(index=False)

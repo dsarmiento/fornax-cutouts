@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 import astrocut
 from astropy.io.fits.hdu.hdulist import HDUList
-from celery import chord
+from celery import Task, chain, group
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
@@ -18,8 +18,9 @@ from fornax_cutouts.utils.redis_uws import redis_uws_client
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 
-@celery_app.task()
+@celery_app.task(bind=True, ignore_result=True)
 def schedule_job(
+    self: Task,
     job_id: str,
     position: list[str],
     size: int,
@@ -46,39 +47,91 @@ def schedule_job(
             position=resolved_position,
             mission_params=mission_params,
             size=size,
+            include_metadata=True,
         )
 
         jobs = []
         for target_fname in target_fnames:
-            for fname in target_fname.filenames:
-                job = generate_cutout.s(
+            for filename_obj in target_fname.filenames:
+                job = generate_cutout.si(
                     job_id=job_id,
-                    source_file=fname,
+                    source_file=filename_obj.filename,
                     target=target_fname.target,
                     size=size,
                     output_format=output_format,
                     output_dir=target_fname.mission,
                     ttl=CONFIG.async_ttl,
+                    mission=target_fname.mission,
+                    metadata=filename_obj.metadata,
                 )
                 jobs.append(job)
 
         await r.update_job_phase(job_id, ExecutionPhase.EXECUTING)
         await r.set_start_time(job_id)
 
-        chord(jobs)(all_done.s(job_id=job_id))
+        # Split jobs into batches
+        batch_size = CONFIG.worker.batch_size
+        total_batches = (len(jobs) + batch_size - 1) // batch_size  # Ceiling division
+
+        if total_batches == 0:
+            # No jobs to process, complete immediately
+            await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
+            await r.set_end_time(job_id)
+            return
+
+        # Create chords for each batch
+        batch_chords = []
+        for batch_num in range(total_batches):
+            start_idx = batch_num * batch_size
+            end_idx = min(start_idx + batch_size, len(jobs))
+            batch_jobs = jobs[start_idx:end_idx]
+
+            # Assign custom task IDs to each job in the batch
+            for batch_idx, job in enumerate(batch_jobs):
+                task_id = f"generate_cutout-{job_id}-{batch_num}-{batch_idx}"
+                job.set(task_id=task_id)
+
+            # Assign custom task ID to batch_done
+            batch_done_task = batch_done.s(job_id=job_id, batch_num=batch_num, total_batches=total_batches)
+            batch_done_task_id = f"batch_done-{job_id}-{batch_num}"
+            batch_done_task.set(task_id=batch_done_task_id)
+
+            batch_chord = group(batch_jobs) | batch_done_task
+            batch_chords.append(batch_chord)
+
+        # Chain all batch chords sequentially
+        chain(*batch_chords).delay()
 
     asyncio.run(task())
 
 
-@celery_app.task(pydantic=True)
-def all_done(job_results: list[CutoutResponse], job_id: str, batch_num: int = 0) -> None:
+@celery_app.task(bind=True, pydantic=True)
+def batch_done(
+    self: Task,
+    job_results: list[dict],
+    job_id: str,
+    batch_num: int,
+    total_batches: int,
+) -> None:
     async def task():
+        cutout_results = [CutoutResponse.model_validate(result) for result in job_results]
+
         r = redis_uws_client()
-        r.append_job_cutout_result(job_id, job_results, batch_num)
-        await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
-        await r.set_end_time(job_id)
+        r.append_job_cutout_result(job_id, cutout_results, batch_num)
+
+        is_last_batch = batch_num == total_batches - 1
+        if is_last_batch:
+            await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
+            await r.set_end_time(job_id)
 
     asyncio.run(task())
+
+    if hasattr(self.request, "chord") and self.request.chord:
+        from celery.result import AsyncResult
+
+        # Forget each task result to free up backend storage
+        for task_id in self.request.chord:
+            AsyncResult(task_id, app=celery_app).forget()
 
 
 def get_fits_filter(fits_cutout: HDUList) -> str | None:
@@ -92,8 +145,9 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
     return filter
 
 
-@celery_app.task(pydantic=True)
+@celery_app.task(bind=True, pydantic=True)
 def generate_cutout(  # noqa: C901
+    self: Task,
     job_id: str,
     source_file: str | list[str],
     target: TargetPosition,
@@ -102,6 +156,8 @@ def generate_cutout(  # noqa: C901
     output_dir: str = "",
     colorize: bool = False,
     ttl: int = CONFIG.sync_ttl,
+    mission: str = "",
+    metadata: dict | None = None,
 ) -> CutoutResponse:
     """
     Generate a cutout within the specific source file
@@ -118,6 +174,10 @@ def generate_cutout(  # noqa: C901
             Defaults to False.
         ttl (int, optional): If destination is S3, time to live of the signed url in seconds.
             Defaults to 1 hr.
+        mission (str, optional): The mission name (e.g., "ps1").
+            Defaults to "".
+        metadata (dict | None, optional): Mission-specific metadata dictionary.
+            Defaults to None.
     """
 
     async def task(
@@ -129,6 +189,8 @@ def generate_cutout(  # noqa: C901
         output_dir,
         colorize,
         ttl,
+        mission,
+        metadata,
     ):
         if isinstance(size, int):
             size = (size, size)
@@ -152,8 +214,10 @@ def generate_cutout(  # noqa: C901
             single_outfile=False,
         )
 
-        filter: str | ColorFilter | None = None
-        if colorize:
+        filter: str | ColorFilter
+        if metadata is not None and "filter" in metadata:
+            filter = metadata.pop("filter")
+        elif colorize:
             filter = ColorFilter(
                 red=get_fits_filter(cutout.fits_cutouts[0]),
                 green=get_fits_filter(cutout.fits_cutouts[1]),
@@ -225,13 +289,13 @@ def generate_cutout(  # noqa: C901
                 img_url = img_url.replace(CUTOUT_STORAGE_PREFIX, "")
 
         resp = CutoutResponse(
-            mission="todo",
+            mission=mission,
             position=target,
             size_px=size,
             filter=filter,
             fits=fits_url,
             preview=img_url,
-            mission_extras={},
+            mission_extras=metadata or {},
         )
 
         return resp
@@ -246,6 +310,8 @@ def generate_cutout(  # noqa: C901
             output_dir=output_dir,
             colorize=colorize,
             ttl=ttl,
+            mission=mission,
+            metadata=metadata,
         )
     )
 
