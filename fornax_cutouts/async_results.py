@@ -14,21 +14,20 @@ from fsspec import AbstractFileSystem, filesystem
 from fornax_cutouts.constants import CUTOUT_STORAGE_PREFIX, DEPLOYMENT_TYPE
 from fornax_cutouts.models.cutouts import CutoutResponse
 
-# This will need to move to another module
-AWS_S3_REGION = os.getenv("AWS_S3_REGION")
-if DEPLOYMENT_TYPE == "aws":
-    import os
 
-    import boto3
+def setup_aws_credentials():
+    # This will need to move to another module
+    if DEPLOYMENT_TYPE == "aws":
+        import boto3
 
-    session = boto3.Session()
-    credentials = session.get_credentials().get_frozen_credentials()
+        session = boto3.Session()
+        credentials = session.get_credentials().get_frozen_credentials()
 
-    # Set the environment variables so DuckDB can use them
-    os.environ["AWS_ACCESS_KEY_ID"] = credentials.access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = credentials.secret_key
-    if credentials.token:
-        os.environ["AWS_SESSION_TOKEN"] = credentials.token
+        # Set the environment variables so DuckDB can use them
+        os.environ["AWS_ACCESS_KEY_ID"] = credentials.access_key
+        os.environ["AWS_SECRET_ACCESS_KEY"] = credentials.secret_key
+        if credentials.token:
+            os.environ["AWS_SESSION_TOKEN"] = credentials.token
 
 
 @dataclass
@@ -37,21 +36,24 @@ class AsyncCutoutResults:
     results_dir: str = field(init=False)
 
     def __post_init__(self):
-        self.results_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{self.job_id}/results/"
+        self.results_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{self.job_id}/results"
+        self.results_path_template = f"{self.results_dir}/results_{{}}.parquet"
+
         self.__duckdb_conn = duckdb.connect()
         self.__fs: AbstractFileSystem = filesystem("local")
 
         if self.results_dir.startswith("s3://"):
+            setup_aws_credentials()
             self.__duckdb_conn.install_extension("httpfs")
             self.__duckdb_conn.load_extension("httpfs")
-            self.__duckdb_conn.query(f"SET s3_region='{AWS_S3_REGION}';")
+            self.__duckdb_conn.query(f"SET s3_region='{os.getenv('AWS_S3_REGION', 'us-east-1')}';")
             self.__fs = filesystem("s3")
 
         if not self.__fs.isdir(self.results_dir):
             self.__fs.mkdir(self.results_dir)
 
     def __write_results_file(self, results: list[CutoutResponse], batch_num: int):
-        results_fname = f"{self.results_dir}/results_{batch_num}.parquet"
+        results_fname = self.results_path_template.format(batch_num)
         if self.__fs.exists(results_fname):
             raise FileExistsError("Results file already exists, not overwriting")
         self.__fs.touch(results_fname)
@@ -108,7 +110,7 @@ class AsyncCutoutResults:
 
     def __get_results(self, page: int, size: int) -> pd.DataFrame:
         try:
-            results_db = self.__duckdb_conn.read_parquet(f"{self.results_dir}/results_*.parquet")
+            results_db = self.__duckdb_conn.read_parquet(self.results_path_template.format("*"))
             curr_results = results_db.limit(size, offset=page * size)
             return curr_results.to_df()
         except duckdb.IOException as e:

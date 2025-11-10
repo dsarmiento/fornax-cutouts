@@ -16,11 +16,12 @@ class CutoutRegistry:
     def _VALID_SOURCES(self) -> list[str]:
         return sorted(self._SOURCES.keys())
 
-    def get_mission(self, mission: str) -> AbstractMissionSource:
-        try:
-            return self._SOURCES[mission]
-        except KeyError as exc:
-            raise ValueError(f"Unknown source '{mission}'. Registered: {', '.join(self._SOURCES)}") from exc
+    def register_source(self, mission: str):
+        def _decorator(cls: AbstractMissionSource) -> AbstractMissionSource:
+            self._SOURCES[mission] = cls()
+            return cls
+
+        return _decorator
 
     def discover_sources(self):
         for source in CONFIG.source_path.glob("**/*.py"):
@@ -30,15 +31,14 @@ class CutoutRegistry:
 
         print(f"Registered sources: {self.get_source_names()}")
 
-    def register_source(self, mission: str):
-        def _decorator(cls: AbstractMissionSource) -> AbstractMissionSource:
-            self._SOURCES[mission] = cls()
-            return cls
-
-        return _decorator
-
     def get_source_names(self) -> list[str]:
         return self._VALID_SOURCES
+
+    def get_mission(self, mission: str) -> AbstractMissionSource:
+        try:
+            return self._SOURCES[mission]
+        except KeyError as exc:
+            raise ValueError(f"Unknown source '{mission}'. Registered: {', '.join(self._SOURCES)}") from exc
 
     def get_mission_metadata(self) -> dict[str, MissionMetadata]:
         return {mission.metadata.name: mission.metadata for mission in self._SOURCES.values()}

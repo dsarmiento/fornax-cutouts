@@ -59,8 +59,6 @@ class CutoutRequest(BaseModel):
             return json.loads(value)
         return value
 
-
-
 class CutoutResponse(CutoutRequest):
     fits: str | None = None
     preview: str | None = None

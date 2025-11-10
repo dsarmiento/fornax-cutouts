@@ -10,7 +10,7 @@ class MissionMetadata(BaseModel):
     name: str
     pixel_size: float
     max_cutout_size: int
-    filter: list[str]
+    filter: list[str]  # Filters need to be instrument specific so maybe don't hardcode a single filter parameter here
     survey: list[str]
 
     class Config:
@@ -24,19 +24,19 @@ class AbstractMissionSource(ABC):
         return f"MissionSource(mission={self.metadata.name})"
 
     def _validate_list_parameter(self, parameter: str | list[str], metadata: list[str]) -> bool:
-        if isinstance(parameter,list):
+        if isinstance(parameter, list):
             return all(item in metadata for item in parameter)
 
-        if isinstance(parameter,str):
+        if isinstance(parameter, str):
             return parameter in metadata
 
         return False
 
     def _cast_list_parameter(self, parameter: str | list[str]) -> list[str]:
-        if isinstance(parameter,list):
+        if isinstance(parameter, list):
             return parameter
 
-        if isinstance(parameter,str):
+        if isinstance(parameter, str):
             return [parameter]
 
         return []
@@ -57,7 +57,7 @@ class AbstractMissionSource(ABC):
     def get_filenames(
         self,
         positions: TargetPosition | Positions,
-        filters: str |list[str],
+        filters: str | list[str],
         *args,
         include_metadata: bool = False,
         **kwargs,
