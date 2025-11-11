@@ -3,8 +3,7 @@ import click
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.sources import cutout_registry
 
-# Normalize defaults from CONFIG.log_level
-_DEFAULT_LOG_LEVEL = getattr(CONFIG, "log_level", "INFO")
+_DEFAULT_LOG_LEVEL = CONFIG.log.level
 _UVICORN_LOG_LEVEL_DEFAULT = str(_DEFAULT_LOG_LEVEL).lower()
 _CELERY_LOG_LEVEL_DEFAULT = str(_DEFAULT_LOG_LEVEL).upper()
 
