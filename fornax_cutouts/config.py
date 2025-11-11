@@ -53,6 +53,7 @@ class StorageConfig(BaseModel):
 
 
 class LoggingConfig(BaseModel):
+    name: str = "fornax_cutouts"
     level: str = "info"
     format: str = "text"  # "text" or "json"
 

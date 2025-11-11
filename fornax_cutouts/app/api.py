@@ -14,14 +14,10 @@ from fornax_cutouts.routes.v1 import api_v1
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.logging import RequestLoggingMiddleware, setup_structured_logging
 
-# Initialize structured logging
-setup_structured_logging(log_level=CONFIG.log.level, format=CONFIG.log.format)
-
-logger = logging.getLogger("uvicorn")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_structured_logging(service="api")
+    logger = logging.getLogger(CONFIG.log.name)
     logger.info("Application startup initiated", extra={"event": "startup"})
     cutout_registry.discover_sources()
 
@@ -34,7 +30,7 @@ async def lifespan(app: FastAPI):
         logger.error(
             "Failed to connect to Redis",
             extra={"event": "redis_connection_failed", "error": str(e), "error_type": type(e).__name__},
-            exc_info=True
+            exc_info=True,
         )
 
     yield
@@ -51,8 +47,7 @@ main_app = FastAPI(
 
 # Add structured logging middleware
 main_app.add_middleware(RequestLoggingMiddleware)
-
-main_app.include_router(api_v1, prefix="/api/v0")   # Beta routes, eventually will be promoted to v1
+main_app.include_router(api_v1, prefix="/api/v0")  # Beta routes, eventually will be promoted to v1
 
 
 @main_app.get(
