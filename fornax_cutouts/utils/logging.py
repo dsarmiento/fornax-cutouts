@@ -174,8 +174,6 @@ def setup_structured_logging(log_level: str = "INFO", format: str = "text") -> N
     root_logger.addHandler(console_handler)
 
     # Configure uvicorn loggers
-    # Note: We skip uvicorn.access because it has special formatting requirements
-    # and the middleware handles request/response logging with structured data
     for logger_name in ["uvicorn", "uvicorn.error"]:
         logger = logging.getLogger(logger_name)
         logger.setLevel(log_level.upper())
@@ -185,5 +183,13 @@ def setup_structured_logging(log_level: str = "INFO", format: str = "text") -> N
 
     # Configure uvicorn.access separately to avoid conflicts with its custom formatter
     access_logger = logging.getLogger("uvicorn.access")
-    access_logger.setLevel(log_level.upper())
-    access_logger.propagate = False
+    if format == "json":
+        # Disable uvicorn.access logging when using JSON format
+        # The middleware handles request/response logging with structured data
+        access_logger.setLevel(logging.CRITICAL)
+        access_logger.handlers.clear()
+        access_logger.propagate = False
+    else:
+        # Keep default access logging for text format
+        access_logger.setLevel(log_level.upper())
+        access_logger.propagate = False
