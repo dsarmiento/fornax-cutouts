@@ -8,17 +8,17 @@ from fastapi import Depends, FastAPI
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from fornax_cutouts.config import CONFIG
+from fornax_cutouts.constants import LOGGER_NAME
 from fornax_cutouts.routes.v1 import api_v1
-from fornax_cutouts.utils.logging import RequestLoggingMiddleware, setup_structured_logging
+from fornax_cutouts.utils.logging import setup_structured_logging
+from fornax_cutouts.utils.middleware import RequestLoggingMiddleware
 from fornax_cutouts.utils.redis_uws import RedisUWS, redis_uws_client
 
-# Initialize structured logging
-setup_structured_logging(log_level=CONFIG.log.level, format=CONFIG.log.format)
-
-logger = logging.getLogger("uvicorn")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_structured_logging(service="api")
+    logger = logging.getLogger(LOGGER_NAME)
     logger.info("Application startup initiated", extra={"event": "startup"})
     try:
         r = redis_uws_client()
@@ -38,10 +38,7 @@ async def lifespan(app: FastAPI):
 
 
 main_app = FastAPI(lifespan=lifespan)
-
-# Add structured logging middleware
 main_app.add_middleware(RequestLoggingMiddleware)
-
 main_app.include_router(api_v1, prefix="/api/v0")   # Beta routes, eventually will be promoted to v1
 
 
