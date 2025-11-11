@@ -66,7 +66,10 @@ def api(
     import uvicorn
 
     from fornax_cutouts.app.api import main_app
+    from fornax_cutouts.config import CONFIG
 
+    # Disable uvicorn access log when using JSON format (handled by middleware)
+    access_log = CONFIG.log.format != "json"
 
     uvicorn.run(
         main_app,
@@ -75,6 +78,7 @@ def api(
         reload=reload,
         workers=workers,
         log_level=log_level,
+        access_log=access_log,
     )
 
 

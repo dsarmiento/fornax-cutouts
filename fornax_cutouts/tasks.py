@@ -30,6 +30,18 @@ def schedule_job(
     async def task():
         r = redis_uws_client()
 
+        logger.info(
+            "Job scheduling started",
+            extra={
+                "event": "job_scheduling_started",
+                "job_id": job_id,
+                "position": position,
+                "size": size,
+                "missions": list(mission_params.keys()),
+                "output_format": output_format,
+            },
+        )
+
         await r.update_job_phase(job_id, ExecutionPhase.QUEUED)
 
         resolved_position = resolve_positions(position)
@@ -40,7 +52,15 @@ def schedule_job(
             if not is_valid:
                 # Specific mission isn't valid, let user know
                 # TODO: Should we allow the user re-submit the mission params for re-scheduling?
-                logger.error(f"{mission!r} params are not valid, please recheck and resubmit.")
+                logger.warning(
+                    f"{mission!r} params are not valid, please recheck and resubmit.",
+                    extra={
+                        "event": "mission_params_invalid",
+                        "job_id": job_id,
+                        "mission": mission,
+                        "mission_params": mission_params[mission],
+                    },
+                )
                 del mission_params[mission]
 
         target_fnames = cutout_registry.get_target_filenames(
@@ -75,9 +95,27 @@ def schedule_job(
 
         if total_batches == 0:
             # No jobs to process, complete immediately
+            logger.warning(
+                "No jobs to process for job",
+                extra={
+                    "event": "no_jobs_to_process",
+                    "job_id": job_id,
+                },
+            )
             await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
             await r.set_end_time(job_id)
             return
+
+        logger.info(
+            "Job batches created",
+            extra={
+                "event": "job_batches_created",
+                "job_id": job_id,
+                "total_jobs": len(jobs),
+                "total_batches": total_batches,
+                "batch_size": batch_size,
+            },
+        )
 
         # Create chords for each batch
         batch_chords = []
@@ -102,7 +140,23 @@ def schedule_job(
         # Chain all batch chords sequentially
         chain(*batch_chords).delay()
 
-    asyncio.run(task())
+    try:
+        asyncio.run(task())
+    except Exception as exc:
+        logger.error(
+            "Job scheduling failed",
+            extra={
+                "event": "job_scheduling_failed",
+                "job_id": job_id,
+                "position": position,
+                "size": size,
+                "missions": list(mission_params.keys()),
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+            exc_info=True,
+        )
+        raise
 
 
 @celery_app.task(bind=True, pydantic=True)
@@ -116,15 +170,49 @@ def batch_done(
     async def task():
         cutout_results = [CutoutResponse.model_validate(result) for result in job_results]
 
+        logger.info(
+            "Batch processing completed",
+            extra={
+                "event": "batch_processing_completed",
+                "job_id": job_id,
+                "batch_num": batch_num,
+                "total_batches": total_batches,
+                "results_count": len(cutout_results),
+            },
+        )
+
         r = redis_uws_client()
         r.append_job_cutout_result(job_id, cutout_results, batch_num)
 
         is_last_batch = batch_num == total_batches - 1
         if is_last_batch:
+            logger.info(
+                "All batches completed, job finished",
+                extra={
+                    "event": "job_completed",
+                    "job_id": job_id,
+                    "total_batches": total_batches,
+                },
+            )
             await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
             await r.set_end_time(job_id)
 
-    asyncio.run(task())
+    try:
+        asyncio.run(task())
+    except Exception as exc:
+        logger.error(
+            "Batch processing failed",
+            extra={
+                "event": "batch_processing_failed",
+                "job_id": job_id,
+                "batch_num": batch_num,
+                "total_batches": total_batches,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+            exc_info=True,
+        )
+        raise
 
     if hasattr(self.request, "chord") and self.request.chord:
         from celery.result import AsyncResult
@@ -192,6 +280,19 @@ def generate_cutout(  # noqa: C901
         mission,
         metadata,
     ):
+        logger.info(
+            "Cutout generation started",
+            extra={
+                "event": "cutout_generation_started",
+                "job_id": job_id,
+                "mission": mission,
+                "target": str(target),
+                "size": str(size),
+                "output_format": output_format,
+                "source_file": source_file[0] if isinstance(source_file, list) else source_file,
+            },
+        )
+
         if isinstance(size, int):
             size = (size, size)
 
@@ -298,21 +399,51 @@ def generate_cutout(  # noqa: C901
             mission_extras=metadata or {},
         )
 
+        logger.info(
+            "Cutout generation completed",
+            extra={
+                "event": "cutout_generation_completed",
+                "job_id": job_id,
+                "mission": mission,
+                "target": str(target),
+                "size": str(size),
+                "filter": str(filter) if filter else None,
+                "fits_url": fits_url,
+                "preview_url": img_url,
+            },
+        )
+
         return resp
 
-    resp = asyncio.run(
-        task(
-            job_id=job_id,
-            source_file=source_file,
-            target=target,
-            size=size,
-            output_format=output_format,
-            output_dir=output_dir,
-            colorize=colorize,
-            ttl=ttl,
-            mission=mission,
-            metadata=metadata,
+    try:
+        resp = asyncio.run(
+            task(
+                job_id=job_id,
+                source_file=source_file,
+                target=target,
+                size=size,
+                output_format=output_format,
+                output_dir=output_dir,
+                colorize=colorize,
+                ttl=ttl,
+                mission=mission,
+                metadata=metadata,
+            )
         )
-    )
-
-    return resp
+        return resp
+    except Exception as exc:
+        logger.error(
+            "Cutout generation failed",
+            extra={
+                "event": "cutout_generation_failed",
+                "job_id": job_id,
+                "mission": mission,
+                "target": str(target),
+                "size": str(size),
+                "source_file": source_file[0] if isinstance(source_file, list) else source_file,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+            exc_info=True,
+        )
+        raise
