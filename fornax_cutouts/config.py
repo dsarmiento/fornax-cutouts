@@ -52,6 +52,11 @@ class StorageConfig(BaseModel):
         return self.prefix.startswith("s3://")
 
 
+class LoggingConfig(BaseModel):
+    level: str = "info"
+    format: str = "text"  # "text" or "json"
+
+
 class FornaxCutoutsConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="cutouts__",
@@ -66,11 +71,11 @@ class FornaxCutoutsConfig(BaseSettings):
 
     redis: RedisConfig = Field(default_factory=RedisConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
+    log: LoggingConfig = Field(default_factory=LoggingConfig)
 
     sync_ttl: int = 1 * 60 * 60  # 1 Hour
     # async_ttl: int = 2 * 7 * 24 * 60 * 60  # 2 Weeks (not currently used)
 
-    log_level: str = "info"
     source_path: Path
 
     storage: StorageConfig = Field(default_factory=StorageConfig)
