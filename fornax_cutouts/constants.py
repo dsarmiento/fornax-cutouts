@@ -13,6 +13,7 @@ ARCSEC_TO_DEG: Final[float] = ARCMIN_TO_DEG / 60
 # Setup
 ################
 
+LOGGER_NAME: Final[str] = "fornax_cutouts"
 ENVIRONMENT_NAME: Final[str] = os.getenv("ENVIRONMENT_NAME", "dev")
 
 
