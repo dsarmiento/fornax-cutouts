@@ -73,33 +73,20 @@ class CutoutRegistry:
         mission_params: dict[str, dict],
         size: int | None = None,
         include_metadata: bool = True,
-    ) -> list[FilenameLookupResponse]:
+    ) -> list[FilenameWithMetadata]:
         ret = []
 
         # TODO: This can be parallelized with async or something, not needed currently with only ps1
-        for target in position:
-            for mission, params in mission_params.items():
-                fnames_result = self._SOURCES[mission].get_filenames(
-                    position=target,
-                    include_metadata=include_metadata,
-                    **params,
-                )
+        for mission, params in mission_params.items():
+            fnames_result = self._SOURCES[mission].get_filenames(
+                position=position,
+                include_metadata=include_metadata,
+                **params,
+            )
 
-                if include_metadata:
-                    filenames = [
-                        FilenameWithMetadata(filename=fname, metadata=meta)
-                        for fname, meta in fnames_result
-                    ]
-                else:
-                    filenames = [FilenameWithMetadata(filename=fname) for fname in fnames_result]
-
-                ret.append(
-                    FilenameLookupResponse(
-                        mission=mission,
-                        target=target,
-                        filenames=filenames,
-                        size=params["size"] if "size" in params else size,
-                    )
-                )
+            if include_metadata:
+                ret.extend([FilenameWithMetadata(filename=fname, metadata=meta) for fname, meta in fnames_result])
+            else:
+                ret.extend([FilenameWithMetadata(filename=fname) for fname in fnames_result])
 
         return ret
