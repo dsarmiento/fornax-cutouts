@@ -78,15 +78,11 @@ class CutoutRegistry:
 
         # TODO: This can be parallelized with async or something, not needed currently with only ps1
         for mission, params in mission_params.items():
-            fnames_result = self._SOURCES[mission].get_filenames(
+            mission_results = self._SOURCES[mission].get_filenames(
                 position=position,
                 include_metadata=include_metadata,
                 **params,
             )
-
-            if include_metadata:
-                ret.extend([FilenameWithMetadata(filename=fname, metadata=meta) for fname, meta in fnames_result])
-            else:
-                ret.extend([FilenameWithMetadata(filename=fname) for fname in fnames_result])
+            ret.extend(mission_results)
 
         return ret
