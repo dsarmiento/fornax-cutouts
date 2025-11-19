@@ -77,15 +77,12 @@ class MetadataHandler:
         if fname_request.position is None:
             raise ValueError("'position' cannot be null")
 
-        mission_params = {
-            mission: {
-                k: v for k, v in fname_request.model_dump().items() if v is not None and k != "position"
-            }
-        }
+        mission_params = fname_request.model_dump(exclude={"position"})
 
-        fnames = cutout_registry.get_target_filenames(
+        fnames = cutout_registry.get_mission(mission).get_filenames(
             position=resolve_positions(fname_request.position),
-            mission_params=mission_params,
+            include_metadata=True,
+            **mission_params,
         )
 
         return {
