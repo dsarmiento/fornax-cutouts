@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 
 from fornax_cutouts.models.base import Positions, TargetPosition
-from fornax_cutouts.models.cutouts import CutoutRequest
+from fornax_cutouts.models.cutouts import FilenameWithMetadata
 
 
 class MissionMetadata(BaseModel):
@@ -61,4 +61,4 @@ class AbstractMissionSource(ABC):
         *args,
         include_metadata: bool = False,
         **kwargs,
-    ) -> list[str] | list[tuple[str, dict]]: ...
+    ) -> list[FilenameWithMetadata]: ...

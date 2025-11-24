@@ -35,6 +35,7 @@ class MetadataHandler:
         mission: Annotated[dict[str, FilenameRequest] | list[str], Body()],
     ):
         mission_result = {}
+        total_files = 0
 
         resolved_positions = resolve_positions(position)
 
@@ -46,9 +47,16 @@ class MetadataHandler:
             request_dict = fname_request.model_dump()
             request_dict["position"] = resolved_positions
             request_dict = {k: v for k, v in request_dict.items() if v is not None}
-            mission_result[mission_name] = cutout_registry.get_mission(mission_name).get_filenames(
-                **request_dict
-            )
+
+            mission_filenames = cutout_registry.get_mission(mission_name).get_filenames(**request_dict)
+
+            mission_total_files = len(mission_filenames)
+            total_files += mission_total_files
+
+            mission_result[mission_name] = {
+                "total_files": mission_total_files,
+                "filenames": mission_filenames,
+            }
 
         # TODO: Build a pydantic model of the return
         return {
@@ -56,7 +64,8 @@ class MetadataHandler:
                 "position": position,
                 "mission": mission,
             },
-            "result": mission_result,
+            "total_files": total_files,
+            "missions": mission_result,
         }
 
     @metadata_router.post("/filenames/{mission}")
@@ -68,18 +77,16 @@ class MetadataHandler:
         if fname_request.position is None:
             raise ValueError("'position' cannot be null")
 
-        mission_params = {
-            mission: {
-                k: v for k, v in fname_request.model_dump().items() if v is not None and k != "position"
-            }
-        }
+        mission_params = fname_request.model_dump(exclude={"position"})
 
-        fnames = cutout_registry.get_target_filenames(
+        fnames = cutout_registry.get_mission(mission).get_filenames(
             position=resolve_positions(fname_request.position),
-            mission_params=mission_params,
+            include_metadata=True,
+            **mission_params,
         )
 
         return {
             "request": fname_request,
-            "result": fnames,
+            "total_files": len(fnames),
+            "filenames": fnames,
         }
