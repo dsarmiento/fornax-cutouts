@@ -1,4 +1,5 @@
 import asyncio
+import gc
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -117,7 +118,7 @@ def batch_done(
         cutout_results = [CutoutResponse.model_validate(result) for result in job_results]
 
         r = redis_uws_client()
-        r.append_job_cutout_result(job_id, cutout_results, batch_num)
+        await r.append_job_cutout_result(job_id, cutout_results, batch_num)
 
         is_last_batch = batch_num == total_batches - 1
         if is_last_batch:
@@ -181,6 +182,7 @@ def generate_cutout(  # noqa: C901
     """
 
     async def task(
+        self: Task,
         job_id,
         source_file,
         target,
@@ -205,7 +207,7 @@ def generate_cutout(  # noqa: C901
                 source_file = [source_file]
             assert isinstance(source_file, list) and len(source_file) == 1, "Cutout must have exactly one source"
 
-        temp_output_dir = "/tmp/cutouts/"
+        temp_output_dir = f"/tmp/cutouts/{self.request.id}"
 
         cutout = astrocut.FITSCutout(
             input_files=source_file,
@@ -260,9 +262,9 @@ def generate_cutout(  # noqa: C901
         else:
             fs = filesystem("local")
 
-        rpath = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{job_id}/"
+        rpath = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{job_id}"
         if output_dir:
-            rpath += f"{output_dir}/"
+            rpath += f"/{output_dir}"
 
         if not fs.isdir(rpath):
             fs.mkdir(rpath)
@@ -298,10 +300,17 @@ def generate_cutout(  # noqa: C901
             mission_extras=metadata or {},
         )
 
+        l_fs: AbstractFileSystem = filesystem("local")
+        l_fs.rm(temp_output_dir, recursive=True)
+        del cutout
+        # Force garbage collection to free memory immediately
+        gc.collect()
+
         return resp
 
     resp = asyncio.run(
         task(
+            self=self,
             job_id=job_id,
             source_file=source_file,
             target=target,
