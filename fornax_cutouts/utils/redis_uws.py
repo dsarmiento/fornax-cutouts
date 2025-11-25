@@ -296,6 +296,17 @@ class RedisUWS:
         key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
         await self.__redis_client.delete(key)
 
+    async def get_and_increment_dispatch_batch_num(self, job_id: str) -> int:
+        """Get the current dispatch batch number and increment it for the next batch."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
+        batch_num = await self.__redis_client.incr(key)
+        return batch_num - 1  # Return the batch_num before increment (0-indexed)
+
+    async def reset_dispatch_batch_num(self, job_id: str):
+        """Reset the dispatch batch number counter for a job (used when starting a new job)."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
+        await self.__redis_client.delete(key)
+
     async def get_results_queue_length(self, job_id: str) -> int:
         """Get the number of results currently in the results queue."""
         key = f"{CUTOUT_JOB_PREFIX}:{job_id}:results"

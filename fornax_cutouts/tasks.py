@@ -80,12 +80,18 @@ def schedule_job(
         await r.set_expected_results(job_id, total_jobs)
         await r.reset_completed_count(job_id)
         await r.reset_batch_num(job_id)
+        await r.reset_dispatch_batch_num(job_id)
 
         await r.update_job_phase(job_id, ExecutionPhase.EXECUTING)
         await r.set_start_time(job_id)
 
-        dispatch_cutouts.delay(job_id=job_id)
-        write_results.apply_async(kwargs={"job_id": job_id}, countdown=30)
+        dispatch_cutouts_task = dispatch_cutouts.s(job_id=job_id)
+        dispatch_cutouts_task.set(task_id=f"dispatch_cutouts-{job_id}-0")
+        dispatch_cutouts_task.delay()
+
+        write_results_task = write_results.s(job_id=job_id, id=0)
+        write_results_task.set(task_id=f"write_results-{job_id}-0")
+        write_results_task.apply_async(countdown=30)
 
     asyncio.run(task())
 
@@ -100,14 +106,16 @@ def dispatch_cutouts(self: Task, job_id: str, batch_size: int | None = None):
         r = redis_uws_client()
         bs = batch_size or CONFIG.worker.batch_size
 
+        dispatch_batch_num = await r.get_and_increment_dispatch_batch_num(job_id)
+
         descriptors = await r.pop_pending_descriptors(job_id, max_items=bs)
         if not descriptors:
             return
 
-        for desc in descriptors:
+        for increment_id, desc in enumerate(descriptors):
             # Convert target list back to TargetPosition NamedTuple
             target = TargetPosition(ra=desc["target"][0], dec=desc["target"][1])
-            generate_cutout.delay(
+            generate_cutout_task = generate_cutout.si(
                 job_id=desc["job_id"],
                 source_file=desc["source_file"],
                 target=target,
@@ -118,18 +126,27 @@ def dispatch_cutouts(self: Task, job_id: str, batch_size: int | None = None):
                 mission=desc["mission"],
                 metadata=desc.get("metadata"),
             )
+            generate_cutout_task.set(task_id=f"generate_cutout-{job_id}-{dispatch_batch_num}-{increment_id}")
+            generate_cutout_task.delay()
 
         if await r.has_pending_descriptors(job_id):
-            dispatch_cutouts.apply_async(kwargs={"job_id": job_id, "batch_size": bs}, countdown=0)
+            dispatch_cutouts_task = dispatch_cutouts.s(job_id=job_id, batch_size=bs)
+            next_dispatch_batch = dispatch_batch_num + 1
+            dispatch_cutouts_task.set(task_id=f"dispatch_cutouts-{job_id}-{next_dispatch_batch}")
+            dispatch_cutouts_task.apply_async(countdown=0)
 
     asyncio.run(task())
 
 
 @celery_app.task(bind=True, ignore_result=True)
-def write_results(self: Task, job_id: str):
+def write_results(self: Task, job_id: str, id: int = 0):
     """
     Chunked results writer: periodically drains results from Redis and writes to AsyncCutoutResults.
     Re-schedules itself until all results are written, then marks job complete.
+
+    Args:
+        job_id: The job ID to write results for
+        id: Incrementing task ID (defaults to 0 for first call)
     """
     async def task():
         r = redis_uws_client()
@@ -139,6 +156,7 @@ def write_results(self: Task, job_id: str):
 
         remaining_results = await r.get_results_queue_length(job_id)
         results_py = await r.pop_results(job_id, max_items=remaining_results) if remaining_results > 0 else []
+        batch_num = None
         if results_py:
             cutout_results = [CutoutResponse.model_validate(rp) for rp in results_py]
             results_writer = r.get_job_cutout_results(job_id)
@@ -151,7 +169,10 @@ def write_results(self: Task, job_id: str):
             await r.set_end_time(job_id)
         else:
             countdown = 15
-            write_results.apply_async(kwargs={"job_id": job_id}, countdown=countdown)
+            next_id = id + 1
+            write_results_task = write_results.s(job_id=job_id, id=next_id)
+            write_results_task.set(task_id=f"write_results-{job_id}-{next_id}")
+            write_results_task.apply_async(countdown=countdown)
 
     asyncio.run(task())
 
