@@ -133,7 +133,7 @@ def dispatch_cutouts(self: Task, job_id: str, batch_size: int | None = None):
             dispatch_cutouts_task = dispatch_cutouts.s(job_id=job_id, batch_size=bs)
             next_dispatch_batch = dispatch_batch_num + 1
             dispatch_cutouts_task.set(task_id=f"dispatch_cutouts-{job_id}-{next_dispatch_batch}")
-            dispatch_cutouts_task.apply_async(countdown=0)
+            dispatch_cutouts_task.apply_async(countdown=bs * 3)  # 3 seconds per cutout
 
     asyncio.run(task())
 
