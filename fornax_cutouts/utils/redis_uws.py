@@ -261,9 +261,19 @@ class RedisUWS:
 
     async def has_pending_descriptors(self, job_id: str) -> bool:
         """Check if there are pending descriptors for a job."""
+        length = await self.get_pending_count(job_id)
+        return length > 0
+
+    async def get_pending_count(self, job_id: str) -> int:
+        """Get the current pending count for a job."""
         key = f"{CUTOUT_JOB_PREFIX}:{job_id}:pending"
         length = await self.__redis_client.llen(key)
-        return length > 0
+        return length
+
+    async def get_failed_count(self, job_id: str) -> int:
+        """Get the current failed count for a job."""
+        length = await self.get_task_failures(job_id, "generate_cutout")
+        return length
 
     async def push_result(self, job_id: str, result: dict):
         """Push a cutout result to the results queue for a job."""
