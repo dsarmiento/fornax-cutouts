@@ -69,13 +69,7 @@ class RedisUWS:
     async def ping(self):
         await self.__redis_client.ping()
 
-    async def __get(self, job_id: str, path: str) -> Any:
-        return await self.__redis_client.json().get(
-            f"{CUTOUT_JOB_PREFIX}:{job_id}",
-            path,
-        )
-
-    async def __update(self, job_id: str, path: str, obj: Any):
+    async def __update_job(self, job_id: str, obj: Any, path: str = "$"):
         await self.__redis_client.json().set(
             name=f"{CUTOUT_JOB_PREFIX}:{job_id}",
             path=path,
@@ -99,7 +93,7 @@ class RedisUWS:
         if time is None:
             time = datetime.now()
 
-        await self.__update(
+        await self.__update_job(
             job_id=job_id,
             path=f"$.{time_field}",
             obj=time.timestamp(),
@@ -122,8 +116,8 @@ class RedisUWS:
         if parameters:
             job_obj["parameters"] = parameters
 
-        await self.__update(
-            job_id=job_id,
+        await self.__redis_client.json().set(
+            name=f"{CUTOUT_JOB_PREFIX}:{job_id}",
             path="$",
             obj=job_obj,
         )
@@ -181,7 +175,7 @@ class RedisUWS:
         return jobs
 
     async def update_job_phase(self, job_id: str, new_phase: ExecutionPhase):
-        await self.__update(
+        await self.__update_job(
             job_id=job_id,
             path="$.phase",
             obj=new_phase,
@@ -197,14 +191,9 @@ class RedisUWS:
     def get_job_cutout_results(self, job_id: str) -> AsyncCutoutResults:
         return AsyncCutoutResults(job_id=job_id)
 
-    async def append_job_cutout_result(self, job_id: str, job_results: list[CutoutResponse], batch_num: int):
+    def append_job_cutout_result(self, job_id: str, job_results: list[CutoutResponse], batch_num: int):
         results = self.get_job_cutout_results(job_id)
         results.add_results(job_results, batch_num)
-
-        num_results = await self.__get(job_id=job_id, path="$.num_results")
-        num_results = num_results if num_results else 0
-        num_results += len(job_results)
-        await self.__update(job_id=job_id, path="$.num_results", obj=num_results)
 
     async def set_quote(self, job_id: str, quote: datetime):
         await self.__set_time(job_id=job_id, time_field="quote", time=quote)

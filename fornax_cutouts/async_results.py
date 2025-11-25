@@ -88,7 +88,24 @@ class AsyncCutoutResults:
         with self.__fs.open(results_fname, "wb") as f:
             pq.write_table(results_t, f)
 
+    def __update_size_file(self, new_count: int):
+        size_path = f"{self.results_dir}/size"
+        size_count = 0
+        if self.__fs.exists(size_path):
+            with self.__fs.open(size_path, "r") as f:
+                existing = f.read()
+            try:
+                size_count = int(existing.strip())
+            except Exception as e:
+                print(f"Error updating size file: {e}")
+                size_count = 0
+
+        size_count += new_count
+        with self.__fs.open(size_path, "w") as f:
+            f.write(str(size_count))
+
     def add_results(self, results: list[CutoutResponse], batch_num: int):
+        self.__update_size_file(len(results))
         self.__write_results_file(results, batch_num)
 
     def __get_results(self, page: int, size: int) -> pd.DataFrame:
