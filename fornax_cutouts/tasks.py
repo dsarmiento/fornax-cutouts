@@ -37,7 +37,6 @@ def schedule_job(
 
         validated_params = cutout_registry.validate_mission_params(mission_params=mission_params, size=size)
 
-        # Build a new dict instead of deleting while iterating
         valid_mission_params: dict[str, dict] = {}
         for mission, is_valid in validated_params.items():
             if not is_valid:
@@ -52,7 +51,6 @@ def schedule_job(
             include_metadata=True,
         )
 
-        # Build lightweight descriptors instead of Celery signatures
         descriptors = []
         for target_fname in target_fnames:
             for filename_obj in target_fname.filenames:
@@ -72,16 +70,13 @@ def schedule_job(
         total_jobs = len(descriptors)
 
         if total_jobs == 0:
-            # No jobs to process, complete immediately
             await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
             await r.set_end_time(job_id)
             return
 
-        # Store descriptors in Redis
         for descriptor in descriptors:
             await r.push_pending_descriptor(job_id, descriptor)
 
-        # Store expected count and reset counters
         await r.set_expected_results(job_id, total_jobs)
         await r.reset_completed_count(job_id)
         await r.reset_batch_num(job_id)
@@ -89,7 +84,6 @@ def schedule_job(
         await r.update_job_phase(job_id, ExecutionPhase.EXECUTING)
         await r.set_start_time(job_id)
 
-        # Launch dispatcher and writer tasks
         dispatch_cutouts.delay(job_id=job_id)
         write_results.apply_async(kwargs={"job_id": job_id}, countdown=30)
 
@@ -106,12 +100,10 @@ def dispatch_cutouts(self: Task, job_id: str, batch_size: int | None = None):
         r = redis_uws_client()
         bs = batch_size or CONFIG.worker.batch_size
 
-        # Pop up to batch_size descriptors from Redis
         descriptors = await r.pop_pending_descriptors(job_id, max_items=bs)
         if not descriptors:
-            return  # Nothing to do; exit
+            return
 
-        # Dispatch generate_cutout tasks for each descriptor
         for desc in descriptors:
             # Convert target list back to TargetPosition NamedTuple
             target = TargetPosition(ra=desc["target"][0], dec=desc["target"][1])
@@ -127,7 +119,6 @@ def dispatch_cutouts(self: Task, job_id: str, batch_size: int | None = None):
                 metadata=desc.get("metadata"),
             )
 
-        # If there are still pending descriptors, re-schedule self
         if await r.has_pending_descriptors(job_id):
             dispatch_cutouts.apply_async(kwargs={"job_id": job_id, "batch_size": bs}, countdown=0)
 
@@ -146,25 +137,20 @@ def write_results(self: Task, job_id: str):
         expected = await r.get_expected_results(job_id)
         completed = await r.get_completed_count(job_id)
 
-        # Pop all available results from Redis
         remaining_results = await r.get_results_queue_length(job_id)
         results_py = await r.pop_results(job_id, max_items=remaining_results) if remaining_results > 0 else []
         if results_py:
-            # Write results to Parquet
             cutout_results = [CutoutResponse.model_validate(rp) for rp in results_py]
             results_writer = r.get_job_cutout_results(job_id)
             batch_num = await r.get_and_increment_batch_num(job_id)
             results_writer.add_results(cutout_results, batch_num=batch_num)
 
-        # Check if we're done
         remaining_results = await r.get_results_queue_length(job_id)
         if completed >= expected and remaining_results == 0:
-            # All cutouts completed and all results written
             await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
             await r.set_end_time(job_id)
         else:
-            # More results to write, re-schedule
-            countdown = 5 if results_py else 15  # Shorter delay if we just wrote something
+            countdown = 15
             write_results.apply_async(kwargs={"job_id": job_id}, countdown=countdown)
 
     asyncio.run(task())
@@ -297,9 +283,9 @@ def generate_cutout(  # noqa: C901
         else:
             fs = filesystem("local")
 
-        rpath = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{job_id}"
+        rpath = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{job_id}/"
         if output_dir:
-            rpath += f"/{output_dir}"
+            rpath += f"{output_dir}/"
 
         if not fs.isdir(rpath):
             fs.mkdir(rpath)
@@ -338,7 +324,6 @@ def generate_cutout(  # noqa: C901
         l_fs: AbstractFileSystem = filesystem("local")
         l_fs.rm(temp_output_dir, recursive=True)
         del cutout
-        # Force garbage collection to free memory immediately
         gc.collect()
 
         r = redis_uws_client()
