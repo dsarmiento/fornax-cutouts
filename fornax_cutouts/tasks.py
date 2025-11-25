@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 import astrocut
 from astrocut.exceptions import InvalidQueryError
 from astropy.io.fits.hdu.hdulist import HDUList
-from celery import Task
+from celery import Task, chord
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
@@ -81,43 +81,39 @@ def schedule_job(
         await r.set_expected_results(job_id, total_jobs)
         await r.reset_completed_count(job_id)
         await r.reset_batch_num(job_id)
-        await r.reset_dispatch_batch_num(job_id)
         await r.reset_task_failures(job_id, "generate_cutout")
 
         await r.update_job_phase(job_id, ExecutionPhase.EXECUTING)
         await r.set_start_time(job_id)
 
-        dispatch_cutouts_task = dispatch_cutouts.s(job_id=job_id)
-        dispatch_cutouts_task.set(task_id=f"dispatch_cutouts-{job_id}-0")
-        dispatch_cutouts_task.delay()
-
-        write_results_task = write_results.s(job_id=job_id, id=0)
-        write_results_task.set(task_id=f"write_results-{job_id}-0")
-        write_results_task.apply_async(countdown=30)
+        batch_cutouts_task = batch_cutouts.s(job_id=job_id)
+        batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-0")
+        batch_cutouts_task.delay()
 
     asyncio.run(task())
 
 
 @celery_app.task(bind=True, ignore_result=True)
-def dispatch_cutouts(self: Task, job_id: str, batch_size: int | None = None):
+def batch_cutouts(self: Task, job_id: str):
     """
-    Chunked dispatcher: pops descriptors from Redis in batches and dispatches generate_cutout tasks.
-    Re-schedules itself if more descriptors remain.
+    Chunked batcher: pops descriptors from Redis in batches and creates generate_cutout tasks
+    using a Celery chord. The chord callback (write_results) handles completion and looping back.
     """
     async def task():
         r = redis_uws_client()
-        bs = batch_size or CONFIG.worker.batch_size
 
-        dispatch_batch_num = await r.get_and_increment_dispatch_batch_num(job_id)
+        batch_num = await r.get_and_increment_batch_num(job_id)
 
-        descriptors = await r.pop_pending_descriptors(job_id, max_items=bs)
+        descriptors = await r.pop_pending_descriptors(job_id, max_items=CONFIG.worker.batch_size)
         if not descriptors:
             return
 
+        # Build signatures for all cutout tasks in this batch
+        cutout_sigs = []
         for increment_id, desc in enumerate(descriptors):
             # Convert target list back to TargetPosition NamedTuple
             target = TargetPosition(ra=desc["target"][0], dec=desc["target"][1])
-            generate_cutout_task = generate_cutout.si(
+            sig = generate_cutout.si(
                 job_id=desc["job_id"],
                 source_file=desc["source_file"],
                 target=target,
@@ -128,55 +124,70 @@ def dispatch_cutouts(self: Task, job_id: str, batch_size: int | None = None):
                 mission=desc["mission"],
                 metadata=desc.get("metadata"),
             )
-            generate_cutout_task.set(task_id=f"generate_cutout-{job_id}-{dispatch_batch_num}-{increment_id}")
-            generate_cutout_task.delay()
+            sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}")
+            cutout_sigs.append(sig)
 
-        if await r.has_pending_descriptors(job_id):
-            dispatch_cutouts_task = dispatch_cutouts.s(job_id=job_id, batch_size=bs)
-            next_dispatch_batch = dispatch_batch_num + 1
-            dispatch_cutouts_task.set(task_id=f"dispatch_cutouts-{job_id}-{next_dispatch_batch}")
-            dispatch_cutouts_task.apply_async(countdown=bs * 3)  # 3 seconds per cutout
+        # Use chord to run all cutout tasks in parallel, then call write_results with their results
+        write_results_sig = write_results.s(job_id=job_id)
+        write_results_sig.set(task_id=f"write_results-{job_id}-{batch_num}")
+        chord(cutout_sigs)(write_results_sig)
 
     asyncio.run(task())
 
 
-@celery_app.task(bind=True, ignore_result=True)
-def write_results(self: Task, job_id: str, id: int = 0):
+@celery_app.task(bind=True)
+def write_results(self: Task, results: list[CutoutResponse | dict | None], job_id: str):
     """
-    Chunked results writer: periodically drains results from Redis and writes to AsyncCutoutResults.
-    Re-schedules itself until all results are written, then marks job complete.
+    Chord callback: receives results from a batch of generate_cutout tasks and writes them to AsyncCutoutResults.
+    Checks if job is complete; if not, loops back to batch_cutouts for the next batch.
 
     Args:
+        results: List of CutoutResponse objects (or dicts/None for failed tasks) from the chord
         job_id: The job ID to write results for
-        id: Incrementing task ID (defaults to 0 for first call)
     """
     async def task():
         r = redis_uws_client()
 
-        expected = await r.get_expected_results(job_id)
-        completed = await r.get_completed_count(job_id)
-        failed_generate = await r.get_task_failures(job_id, "generate_cutout")
-        effective_completed = completed + failed_generate
+        # Filter out None/failed results and validate
+        valid_results = [rp for rp in results if rp is not None]
+        cutout_results = []
+        for rp in valid_results:
+            if isinstance(rp, dict):
+                cutout_results.append(CutoutResponse.model_validate(rp))
+            elif isinstance(rp, CutoutResponse):
+                cutout_results.append(rp)
+            else:
+                # Skip invalid result types
+                continue
 
-        remaining_results = await r.get_results_queue_length(job_id)
-        results_py = await r.pop_results(job_id, max_items=remaining_results) if remaining_results > 0 else []
-        batch_num = None
-        if results_py:
-            cutout_results = [CutoutResponse.model_validate(rp) for rp in results_py]
+        # Write results to Parquet storage if we have any
+        if cutout_results:
             results_writer = r.get_job_cutout_results(job_id)
             batch_num = await r.get_and_increment_batch_num(job_id)
             results_writer.add_results(cutout_results, batch_num=batch_num)
 
-        remaining_results = await r.get_results_queue_length(job_id)
-        if effective_completed >= expected and remaining_results == 0:
+            # Update completed counter for successful results
+            await r.increment_completed(job_id, amount=len(cutout_results))
+
+        # Check if job is complete
+        expected = await r.get_expected_results(job_id)
+        completed = await r.get_completed_count(job_id)
+        failed_generate = await r.get_task_failures(job_id, "generate_cutout")
+        pending = await r.get_pending_count(job_id)
+
+        effective_completed = completed + failed_generate
+
+        if effective_completed >= expected and pending == 0:
+            # All work is done
             await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
             await r.set_end_time(job_id)
-        else:
-            countdown = 15
-            next_id = id + 1
-            write_results_task = write_results.s(job_id=job_id, id=next_id)
-            write_results_task.set(task_id=f"write_results-{job_id}-{next_id}")
-            write_results_task.apply_async(countdown=countdown)
+        elif pending > 0:
+            # More descriptors remain, batch next batch
+            # Get the next batch number (current + 1) for task_id
+            next_batch = await r.get_batch_num(job_id) + 1
+            batch_cutouts_task = batch_cutouts.s(job_id=job_id)
+            batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-{next_batch}")
+            batch_cutouts_task.delay()
 
     asyncio.run(task())
 
@@ -366,9 +377,6 @@ def generate_cutout(  # noqa: C901
         l_fs.rm(temp_output_dir, recursive=True)
         del cutout
         gc.collect()
-
-        await r.push_result(job_id, resp.model_dump(mode="json"))
-        await r.increment_completed(job_id)
 
         return resp
 

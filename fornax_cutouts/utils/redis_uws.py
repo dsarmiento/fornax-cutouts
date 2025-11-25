@@ -291,10 +291,10 @@ class RedisUWS:
             results.append(json.loads(result))
         return results
 
-    async def increment_completed(self, job_id: str) -> int:
-        """Increment the completed counter for a job and return the new value."""
+    async def increment_completed(self, job_id: str, amount: int = 1) -> int:
+        """Increment the completed counter for a job by the specified amount and return the new value."""
         key = f"{CUTOUT_JOB_PREFIX}:{job_id}:completed"
-        return await self.__redis_client.incr(key)
+        return await self.__redis_client.incrby(key, amount)
 
     async def get_completed_count(self, job_id: str) -> int:
         """Get the current completed count for a job."""
@@ -307,6 +307,12 @@ class RedisUWS:
         key = f"{CUTOUT_JOB_PREFIX}:{job_id}:completed"
         await self.__redis_client.delete(key)
 
+    async def get_batch_num(self, job_id: str) -> int:
+        """Get the current batch number without incrementing."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
+        count = await self.__redis_client.get(key)
+        return int(count) if count else 0
+
     async def get_and_increment_batch_num(self, job_id: str) -> int:
         """Get the current batch number and increment it for the next batch."""
         key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
@@ -315,17 +321,6 @@ class RedisUWS:
 
     async def reset_batch_num(self, job_id: str):
         """Reset the batch number counter for a job (used when starting a new job)."""
-        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
-        await self.__redis_client.delete(key)
-
-    async def get_and_increment_dispatch_batch_num(self, job_id: str) -> int:
-        """Get the current dispatch batch number and increment it for the next batch."""
-        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
-        batch_num = await self.__redis_client.incr(key)
-        return batch_num - 1  # Return the batch_num before increment (0-indexed)
-
-    async def reset_dispatch_batch_num(self, job_id: str):
-        """Reset the dispatch batch number counter for a job (used when starting a new job)."""
         key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
         await self.__redis_client.delete(key)
 
