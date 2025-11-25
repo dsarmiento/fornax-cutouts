@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import astrocut
+from astrocut.exceptions import InvalidQueryError
 from astropy.io.fits.hdu.hdulist import HDUList
 from celery import Task
 from fsspec import AbstractFileSystem, filesystem
@@ -81,6 +82,7 @@ def schedule_job(
         await r.reset_completed_count(job_id)
         await r.reset_batch_num(job_id)
         await r.reset_dispatch_batch_num(job_id)
+        await r.reset_task_failures(job_id, "generate_cutout")
 
         await r.update_job_phase(job_id, ExecutionPhase.EXECUTING)
         await r.set_start_time(job_id)
@@ -153,6 +155,8 @@ def write_results(self: Task, job_id: str, id: int = 0):
 
         expected = await r.get_expected_results(job_id)
         completed = await r.get_completed_count(job_id)
+        failed_generate = await r.get_task_failures(job_id, "generate_cutout")
+        effective_completed = completed + failed_generate
 
         remaining_results = await r.get_results_queue_length(job_id)
         results_py = await r.pop_results(job_id, max_items=remaining_results) if remaining_results > 0 else []
@@ -164,7 +168,7 @@ def write_results(self: Task, job_id: str, id: int = 0):
             results_writer.add_results(cutout_results, batch_num=batch_num)
 
         remaining_results = await r.get_results_queue_length(job_id)
-        if completed >= expected and remaining_results == 0:
+        if effective_completed >= expected and remaining_results == 0:
             await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
             await r.set_end_time(job_id)
         else:
@@ -236,6 +240,8 @@ def generate_cutout(  # noqa: C901
         mission,
         metadata,
     ):
+        r = redis_uws_client()
+
         if isinstance(size, int):
             size = (size, size)
 
@@ -251,12 +257,26 @@ def generate_cutout(  # noqa: C901
 
         temp_output_dir = f"/tmp/cutouts/{self.request.id}"
 
-        cutout = astrocut.FITSCutout(
-            input_files=source_file,
-            coordinates=f"{target[0]} {target[1]}",
-            cutout_size=size,
-            single_outfile=False,
-        )
+        try:
+            cutout = astrocut.FITSCutout(
+                input_files=source_file,
+                coordinates=f"{target[0]} {target[1]}",
+                cutout_size=size,
+                single_outfile=False,
+            )
+        except InvalidQueryError as exc:
+            # Preserve behavior for sync endpoints which expect this exception
+            if job_id in ("sync", "color_preview"):
+                raise exc
+
+            await r.increment_task_failures(job_id, "generate_cutout")
+
+            # Best-effort cleanup; directory may or may not exist
+            local_fs: AbstractFileSystem = filesystem("local")
+            if local_fs.isdir(temp_output_dir):
+                local_fs.rm(temp_output_dir, recursive=True)
+
+            return
 
         filter: str | ColorFilter
         if metadata is not None and "filter" in metadata:
@@ -347,7 +367,6 @@ def generate_cutout(  # noqa: C901
         del cutout
         gc.collect()
 
-        r = redis_uws_client()
         await r.push_result(job_id, resp.model_dump(mode="json"))
         await r.increment_completed(job_id)
 

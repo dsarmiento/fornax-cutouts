@@ -23,6 +23,18 @@ CUTOUT_INDEX_NAME = "cutoutJobsIdx"
 CUTOUT_JOB_PREFIX = f"{CONFIG.worker.redis_prefix}:jobs"
 
 
+def json_dumps_with_encoders(obj: Any) -> str:
+    """
+    JSON dumps with datetime serialization support.
+    """
+    def custom_encoders(o: Any) -> Any:
+        if isinstance(o, datetime):
+            return o.isoformat(timespec="seconds").replace("+00:00", "Z")
+        raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
+
+    return json.dumps(obj, default=custom_encoders)
+
+
 def redis_uws_client():
     return RedisUWS()
 
@@ -234,7 +246,7 @@ class RedisUWS:
     async def push_pending_descriptor(self, job_id: str, descriptor: dict):
         """Push a cutout descriptor to the pending queue for a job."""
         key = f"{CUTOUT_JOB_PREFIX}:{job_id}:pending"
-        await self.__redis_client.rpush(key, json.dumps(descriptor))
+        await self.__redis_client.rpush(key, json_dumps_with_encoders(descriptor))
 
     async def pop_pending_descriptors(self, job_id: str, max_items: int) -> list[dict]:
         """Pop up to max_items descriptors from the pending queue."""
@@ -256,7 +268,7 @@ class RedisUWS:
     async def push_result(self, job_id: str, result: dict):
         """Push a cutout result to the results queue for a job."""
         key = f"{CUTOUT_JOB_PREFIX}:{job_id}:results"
-        await self.__redis_client.rpush(key, json.dumps(result))
+        await self.__redis_client.rpush(key, json_dumps_with_encoders(result))
 
     async def pop_results(self, job_id: str, max_items: int) -> list[dict]:
         """Pop up to max_items results from the results queue."""
