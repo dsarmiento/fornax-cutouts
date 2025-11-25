@@ -54,7 +54,7 @@ class RedisUWS:
                     NumericField("$.creation_time", as_name="creation_time"),
                 ],
                 definition=IndexDefinition(
-                    prefix=[CUTOUT_JOB_PREFIX],
+                    prefix=[f"{CUTOUT_JOB_PREFIX}:*:uws"],
                     index_type=IndexType.JSON,
                 ),
             )
@@ -71,7 +71,7 @@ class RedisUWS:
 
     async def __update_job(self, job_id: str, obj: Any, path: str = "$"):
         await self.__redis_client.json().set(
-            name=f"{CUTOUT_JOB_PREFIX}:{job_id}",
+            name=f"{CUTOUT_JOB_PREFIX}:{job_id}:uws",
             path=path,
             obj=obj,
         )
@@ -117,14 +117,14 @@ class RedisUWS:
             job_obj["parameters"] = parameters
 
         await self.__redis_client.json().set(
-            name=f"{CUTOUT_JOB_PREFIX}:{job_id}",
+            name=f"{CUTOUT_JOB_PREFIX}:{job_id}:uws",
             path="$",
             obj=job_obj,
         )
         await self.set_create_time(job_id)
 
     async def get_job(self, job_id: str) -> JobSummary:
-        job_json: dict = await self.__redis_client.json().get(f"{CUTOUT_JOB_PREFIX}:{job_id}")
+        job_json: dict = await self.__redis_client.json().get(f"{CUTOUT_JOB_PREFIX}:{job_id}:uws")
         job_json.pop("results", None)
         return create_job_summary(**job_json)
 
@@ -183,7 +183,7 @@ class RedisUWS:
 
     async def get_job_parameters(self, job_id: str) -> Parameters:
         job_parameters = await self.__redis_client.json().get(
-            f"{CUTOUT_JOB_PREFIX}:{job_id}",
+            f"{CUTOUT_JOB_PREFIX}:{job_id}:uws",
             "$.parameters",
         )
         return create_parameters(**job_parameters[0])
@@ -218,3 +218,101 @@ class RedisUWS:
 
     async def set_destruction(self, job_id: str, destruction: datetime):
         await self.__set_time(job_id=job_id, time_field="destruction", time=destruction)
+
+    # Chunked scheduling helpers
+    async def set_expected_results(self, job_id: str, expected_count: int):
+        """Store the expected number of cutout results for a job."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:expected_results"
+        await self.__redis_client.set(key, expected_count)
+
+    async def get_expected_results(self, job_id: str) -> int:
+        """Get the expected number of cutout results for a job."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:expected_results"
+        count = await self.__redis_client.get(key)
+        return int(count) if count else 0
+
+    async def push_pending_descriptor(self, job_id: str, descriptor: dict):
+        """Push a cutout descriptor to the pending queue for a job."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:pending"
+        await self.__redis_client.rpush(key, json.dumps(descriptor))
+
+    async def pop_pending_descriptors(self, job_id: str, max_items: int) -> list[dict]:
+        """Pop up to max_items descriptors from the pending queue."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:pending"
+        descriptors = []
+        for _ in range(max_items):
+            result = await self.__redis_client.lpop(key)
+            if result is None:
+                break
+            descriptors.append(json.loads(result))
+        return descriptors
+
+    async def has_pending_descriptors(self, job_id: str) -> bool:
+        """Check if there are pending descriptors for a job."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:pending"
+        length = await self.__redis_client.llen(key)
+        return length > 0
+
+    async def push_result(self, job_id: str, result: dict):
+        """Push a cutout result to the results queue for a job."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:results"
+        await self.__redis_client.rpush(key, json.dumps(result))
+
+    async def pop_results(self, job_id: str, max_items: int) -> list[dict]:
+        """Pop up to max_items results from the results queue."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:results"
+        results = []
+        for _ in range(max_items):
+            result = await self.__redis_client.lpop(key)
+            if result is None:
+                break
+            results.append(json.loads(result))
+        return results
+
+    async def increment_completed(self, job_id: str) -> int:
+        """Increment the completed counter for a job and return the new value."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:completed"
+        return await self.__redis_client.incr(key)
+
+    async def get_completed_count(self, job_id: str) -> int:
+        """Get the current completed count for a job."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:completed"
+        count = await self.__redis_client.get(key)
+        return int(count) if count else 0
+
+    async def reset_completed_count(self, job_id: str):
+        """Reset the completed counter for a job (used when starting a new job)."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:completed"
+        await self.__redis_client.delete(key)
+
+    async def get_and_increment_batch_num(self, job_id: str) -> int:
+        """Get the current batch number and increment it for the next batch."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
+        batch_num = await self.__redis_client.incr(key)
+        return batch_num - 1  # Return the batch_num before increment (0-indexed)
+
+    async def reset_batch_num(self, job_id: str):
+        """Reset the batch number counter for a job (used when starting a new job)."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:batch_num"
+        await self.__redis_client.delete(key)
+
+    async def get_results_queue_length(self, job_id: str) -> int:
+        """Get the number of results currently in the results queue."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:results"
+        return await self.__redis_client.llen(key)
+
+    async def increment_task_failures(self, job_id: str, task_type: str) -> int:
+        """Increment failure counter for a specific task type and return the new count."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:failures:{task_type}"
+        return await self.__redis_client.incr(key)
+
+    async def get_task_failures(self, job_id: str, task_type: str) -> int:
+        """Get the current failure count for a specific task type."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:failures:{task_type}"
+        count = await self.__redis_client.get(key)
+        return int(count) if count else 0
+
+    async def reset_task_failures(self, job_id: str, task_type: str):
+        """Reset failure counter for a specific task type."""
+        key = f"{CUTOUT_JOB_PREFIX}:{job_id}:failures:{task_type}"
+        await self.__redis_client.delete(key)
