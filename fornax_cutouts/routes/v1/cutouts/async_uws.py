@@ -312,6 +312,13 @@ class CutoutsUWSHandler:
                     id="summary",
                     type=XlinkType.SIMPLE,
                     href=f"/api/v0/cutouts/async/{job_id}/results/summary",
+                    size=1,
+                    mime_type="application/json",
+                ),
+                ResultReference(
+                    id="cutouts",
+                    type=XlinkType.SIMPLE,
+                    href=f"/api/v0/cutouts/async/{job_id}/results/cutouts",
                     size=100,
                     mime_type="application/xml",
                     # any_attrs={
@@ -319,12 +326,35 @@ class CutoutsUWSHandler:
                     #     "page": "0",
                     #     "size": "100",
                     # }
-                )
+                ),
             ]
         )
         return XmlResponse(results.to_xml())
 
     @uws_router.get("/async/{job_id}/results/summary")
+    async def get_job_summary_results(
+        self,
+        job_id: Annotated[
+            str,
+            Path(description="Server-assigned job ID for the request"),
+        ],
+    ):
+        """
+        Return job summary results in a JSON format
+        """
+        completed_jobs = await self.uws_redis.get_completed_count(job_id)
+        pending_jobs = await self.uws_redis.get_pending_count(job_id)
+        failed_jobs = await self.uws_redis.get_failed_count(job_id)
+        total_jobs = await self.uws_redis.get_expected_results(job_id)
+
+        return {
+            "completed_jobs": completed_jobs,
+            "pending_jobs": pending_jobs,
+            "failed_jobs": failed_jobs,
+            "total_jobs": total_jobs,
+        }
+
+    @uws_router.get("/async/{job_id}/results/cutouts")
     async def get_job_json_results(
         self,
         job_id: Annotated[
@@ -345,8 +375,7 @@ class CutoutsUWSHandler:
         ] = 100,
     ):
         """
-        Return job details per UWS spec
-        https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
+        Return job cutout results in a table format
         """
         job_results = self.uws_redis.get_job_cutout_results(job_id)
 

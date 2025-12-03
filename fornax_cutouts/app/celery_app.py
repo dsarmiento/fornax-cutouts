@@ -23,6 +23,10 @@ conf_update = {
         "global_keyprefix": f"{CONFIG.worker.redis_prefix}:celery:results:",
     },
     "result_expires": 1 * 60 * 60,  # 1 Hour,
+    # Worker memory management
+    "worker_prefetch_multiplier": 1,  # Only prefetch 1 task at a time to prevent memory buildup
+    "task_acks_late": True,  # Acknowledge tasks after completion, not before
+    "worker_max_tasks_per_child": 50,  # Restart worker after N tasks to prevent memory leaks
 }
 
 if CONFIG.redis.use_ssl:
