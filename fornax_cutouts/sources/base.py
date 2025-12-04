@@ -1,64 +1,62 @@
 from abc import ABC, abstractmethod
+from typing import Any, Type, TypeVar, get_origin
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationInfo, field_validator
 
 from fornax_cutouts.models.base import Positions, TargetPosition
 from fornax_cutouts.models.cutouts import FilenameWithMetadata
 
 
+class BaseParameters(BaseModel):
+    """
+    Base class for all mission parameter models.
+
+    Provides a pre-validator that, for any field annotated as a list[...],
+    wraps a single scalar value into a one-element list. This lets callers
+    pass either a scalar or a list for list-typed parameters.
+    """
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def normalize_single_to_list(cls, value: Any, info: ValidationInfo):
+        field_type = cls.model_fields[info.field_name].annotation
+
+        if get_origin(field_type) is list:
+            if isinstance(value, list):
+                return value
+            else:
+                return [value]
+
+        return value
+
+
 class MissionMetadata(BaseModel):
     name: str
-    pixel_size: float
-    max_cutout_size: int
-    filter: list[str]  # Filters need to be instrument specific so maybe don't hardcode a single filter parameter here
-    survey: list[str]
+    description: str = ""
+    pixel_size_arcseconds: float
+    max_cutout_size_px: int
 
-    class Config:
-        extra = "allow"
+
+MissionParameters = TypeVar("MissionParameters", bound=BaseParameters)
 
 
 class AbstractMissionSource(ABC):
     metadata: MissionMetadata
+    params_model: Type[MissionParameters]
 
     def __repr__(self):
         return f"MissionSource(mission={self.metadata.name})"
 
-    def _validate_list_parameter(self, parameter: str | list[str], metadata: list[str]) -> bool:
-        if isinstance(parameter, list):
-            return all(item in metadata for item in parameter)
-
-        if isinstance(parameter, str):
-            return parameter in metadata
-
-        return False
-
-    def _cast_list_parameter(self, parameter: str | list[str]) -> list[str]:
-        if isinstance(parameter, list):
-            return parameter
-
-        if isinstance(parameter, str):
-            return [parameter]
-
-        return []
-
-    def validate_request(self, size: int, **extras):
-        filter = extras.get("filter", [])
-        survey = extras.get("survey", [])
-
-        is_valid = True
-        is_valid &= size > 0
-        is_valid &= size <= self.metadata.max_cutout_size
-        is_valid &= self._validate_list_parameter(filter, self.metadata.filter)
-        is_valid &= self._validate_list_parameter(survey, self.metadata.survey)
-
-        return is_valid
+    def validate_mission_params(self, request: dict = {}) -> MissionParameters:
+        return self.params_model.model_validate(request)
 
     @abstractmethod
     def get_filenames(
         self,
         positions: TargetPosition | Positions,
-        filters: str | list[str],
+        params: MissionParameters,
         *args,
         include_metadata: bool = False,
         **kwargs,
-    ) -> list[FilenameWithMetadata]: ...
+    ) -> list[FilenameWithMetadata]:
+        ...
