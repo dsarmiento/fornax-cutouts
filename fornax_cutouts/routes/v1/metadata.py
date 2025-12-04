@@ -18,7 +18,17 @@ class MetadataHandler:
         description="Returns metadata for all registered cutout missions/surveys.",
     )
     def get_missions(self):
-        return cutout_registry.get_mission_metadata()
+        """
+        Get metadata for all registered missions.
+        Includes parameter schemas from params_model.
+        """
+        missions = cutout_registry.get_mission_metadata()
+        result = {}
+        for name, meta in missions.items():
+            meta_dict = meta.model_dump(exclude={"params_model"})
+            meta_dict["parameters_schema"] = meta.params_model.model_json_schema()
+            result[name] = meta_dict
+        return result
 
     @metadata_router.get(
         "/missions/{mission}",
@@ -29,8 +39,15 @@ class MetadataHandler:
         self,
         mission: str,
     ):
+        """
+        Get metadata for a specific mission.
+        Includes parameter schema from params_model.
+        """
         try:
-            return cutout_registry.get_mission(mission).metadata
+            meta = cutout_registry.get_mission(mission).metadata
+            meta_dict = meta.model_dump(exclude={"params_model"})
+            meta_dict["parameters_schema"] = meta.params_model.model_json_schema()
+            return meta_dict
         except KeyError:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -92,16 +109,19 @@ class MetadataHandler:
     def get_mission_filenames(
         self,
         mission: str,
-        fname_request: Annotated[FilenameRequest, Body()],
+        fname_request: Annotated[dict, Body()],
     ):
-        if fname_request.position is None:
+        if "position" not in fname_request or fname_request["position"] is None:
             raise ValueError("'position' cannot be null")
 
-        mission_params = fname_request.model_dump(exclude={"position"})
+        positions = resolve_positions(fname_request["position"])
+        mission_source = cutout_registry.get_mission(mission)
+        mission_params = mission_source.validate_mission_params({k: v for k, v in fname_request.items() if k != "position"})
 
-        fnames = cutout_registry.get_mission(mission).get_filenames(
-            position=resolve_positions(fname_request.position),
-            **mission_params,
+        fnames = mission_source.get_filenames(
+            positions=positions,
+            params=mission_params,
+            include_metadata=True,
         )
 
         return {
