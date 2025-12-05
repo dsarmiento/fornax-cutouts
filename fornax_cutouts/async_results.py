@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass, field
 from io import BytesIO
 
+import boto3
 import duckdb
 import pandas as pd
 import pyarrow as pa
@@ -12,7 +13,6 @@ from fsspec import AbstractFileSystem, filesystem
 
 from fornax_cutouts.constants import AWS_S3_REGION, CUTOUT_STORAGE_PREFIX
 from fornax_cutouts.models.cutouts import CutoutResponse
-from fornax_cutouts.utils.aws import get_aws_credentials
 
 
 @dataclass
@@ -31,17 +31,18 @@ class AsyncCutoutResults:
             self.__duckdb_conn.install_extension("httpfs")
             self.__duckdb_conn.load_extension("httpfs")
 
-            access_key, secret_key, token = get_aws_credentials()
+            session = boto3.Session()
+            credentials = session.get_credentials().get_frozen_credentials()
 
             self.__duckdb_conn.query(f"SET s3_region='{AWS_S3_REGION}';")
             self.__duckdb_conn.query("SET s3_use_ssl=true;")
             self.__duckdb_conn.query("SET s3_url_style='path';")
-            if access_key:
-                self.__duckdb_conn.query(f"SET s3_access_key_id='{access_key}';")
-            if secret_key:
-                self.__duckdb_conn.query(f"SET s3_secret_access_key='{secret_key}';")
-            if token:
-                self.__duckdb_conn.query(f"SET s3_session_token='{token}';")
+            if credentials.access_key:
+                self.__duckdb_conn.query(f"SET s3_access_key_id='{credentials.access_key}';")
+            if credentials.secret_key:
+                self.__duckdb_conn.query(f"SET s3_secret_access_key='{credentials.secret_key}';")
+            if credentials.token:
+                self.__duckdb_conn.query(f"SET s3_session_token='{credentials.token}';")
 
             self.__fs = filesystem("s3")
 
