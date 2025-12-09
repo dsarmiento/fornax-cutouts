@@ -49,3 +49,11 @@ async def health_check(
         "details": details,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
+
+
+@main_app.get("/api/dev/flushdb")
+async def flush_db(
+    r: Annotated[RedisUWS, Depends(redis_uws_client)],
+):
+    await r.flushdb()
+    return {"message": "Database flushed"}
