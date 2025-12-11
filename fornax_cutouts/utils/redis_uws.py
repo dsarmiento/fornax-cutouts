@@ -171,7 +171,7 @@ class RedisUWS:
 
         else:
             keys = []
-            async for key in self.__redis_client.scan_iter(match=f"{CUTOUT_JOB_PREFIX}:*", count=100):
+            async for key in self.__redis_client.scan_iter(match=f"{CUTOUT_JOB_PREFIX}:*:uws", count=100):
                 keys.append(key.decode())
 
             if keys:
