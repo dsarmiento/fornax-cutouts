@@ -1,5 +1,6 @@
 import asyncio
-import gc
+import json
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -166,9 +167,6 @@ def write_results(self: Task, results: list[CutoutResponse | dict | None], job_i
             batch_num = await r.get_and_increment_batch_num(job_id)
             results_writer.add_results(cutout_results, batch_num=batch_num)
 
-            # Update completed counter for successful results
-            await r.increment_completed(job_id, amount=len(cutout_results))
-
         # Check if job is complete
         expected = await r.get_expected_results(job_id)
         completed = await r.get_completed_count(job_id)
@@ -251,8 +249,9 @@ def generate_cutout(  # noqa: C901
         mission,
         metadata,
     ):
-        r = redis_uws_client()
 
+        time_task_start = time.time()
+        time_start = time_task_start
         if isinstance(size, int):
             size = (size, size)
 
@@ -267,25 +266,43 @@ def generate_cutout(  # noqa: C901
             assert isinstance(source_file, list) and len(source_file) == 1, "Cutout must have exactly one source"
 
         temp_output_dir = f"/tmp/cutouts/{self.request.id}"
+        time_end = time.time()
+        setup_time = time_end - time_start
 
         try:
+            time_start = time.time()
             cutout = astrocut.FITSCutout(
                 input_files=source_file,
                 coordinates=f"{target[0]} {target[1]}",
                 cutout_size=size,
                 single_outfile=False,
             )
+            time_end = time.time()
+            cutout_time = time_end - time_start
+
         except InvalidQueryError as exc:
             # Preserve behavior for sync endpoints which expect this exception
             if job_id in ("sync", "color_preview"):
                 raise exc
 
-            await r.increment_task_failures(job_id, "generate_cutout")
+            uws_client = redis_uws_client()
+            await uws_client.increment_task_failures(job_id, "generate_cutout")
 
-            # Best-effort cleanup; directory may or may not exist
             local_fs: AbstractFileSystem = filesystem("local")
             if local_fs.isdir(temp_output_dir):
                 local_fs.rm(temp_output_dir, recursive=True)
+
+            print(f"Error: {json.dumps({
+                    'error': str(exc),
+                    'input_files': source_file,
+                    'coordinates': target,
+                    'cutout_size': size
+                })}")
+
+            await uws_client.close()
+
+            del local_fs
+            del uws_client
 
             return
 
@@ -307,6 +324,8 @@ def generate_cutout(  # noqa: C901
 
         lpaths = []
 
+
+        time_start = time.time()
         fits_fname = ""
         if "fits" in output_format:
             fits_fname = cutout.write_as_fits(
@@ -329,6 +348,11 @@ def generate_cutout(  # noqa: C901
 
             lpaths.append(img_fname)
 
+        time_end = time.time()
+        local_write_time = time_end - time_start
+
+
+        time_start = time.time()
         fs: AbstractFileSystem
         if CUTOUT_STORAGE_IS_S3:
             fs = filesystem("s3")
@@ -339,7 +363,9 @@ def generate_cutout(  # noqa: C901
         if output_dir:
             rpath += f"{output_dir}/"
 
-        if not fs.isdir(rpath):
+        # Only create directories for local filesystem; S3 doesn't need them
+        # and the isdir/mkdir calls are expensive LIST operations
+        if not CUTOUT_STORAGE_IS_S3 and not fs.isdir(rpath):
             fs.mkdir(rpath)
 
         for lpath in lpaths:
@@ -348,9 +374,13 @@ def generate_cutout(  # noqa: C901
                 rpath=rpath,
             )
 
+        time_end = time.time()
+        remote_write_time = time_end - time_start
+
+
+        time_start = time.time()
         fits_url = fits_fname.replace(temp_output_dir, rpath)
         img_url = img_fname.replace(temp_output_dir, rpath)
-
         if CUTOUT_STORAGE_IS_S3:
             if fits_url:
                 fits_url = fs.sign(fits_url, expiration=ttl)
@@ -375,8 +405,28 @@ def generate_cutout(  # noqa: C901
 
         l_fs: AbstractFileSystem = filesystem("local")
         l_fs.rm(temp_output_dir, recursive=True)
+
+        uws_client = redis_uws_client()
+        await uws_client.increment_completed(job_id, amount=1)
+        await uws_client.close()
+
+        del uws_client
         del cutout
-        gc.collect()
+        del l_fs
+        del fs
+        time_end = time.time()
+        create_response_time = time_end - time_start
+        total_time = time_end - time_task_start
+
+        print(json.dumps({
+            "source_file": source_file,
+            "setup_time": round(setup_time, 2),
+            "cutout_time": round(cutout_time, 2),
+            "local_write_time": round(local_write_time, 2),
+            "remote_write_time": round(remote_write_time, 2),
+            "create_response_time": round(create_response_time, 2),
+            "total_time": round(total_time, 2)
+        }))
 
         return resp
 
