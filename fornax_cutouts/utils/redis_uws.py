@@ -81,6 +81,9 @@ class RedisUWS:
     async def ping(self):
         await self.__redis_client.ping()
 
+    async def flushdb(self):
+        await self.__redis_client.flushdb()
+
     async def __update_job(self, job_id: str, obj: Any, path: str = "$"):
         await self.__redis_client.json().set(
             name=f"{CUTOUT_JOB_PREFIX}:{job_id}:uws",

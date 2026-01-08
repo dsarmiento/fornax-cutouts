@@ -26,8 +26,10 @@ class AsyncCutoutResults:
 
         self.__duckdb_conn = duckdb.connect()
         self.__fs: AbstractFileSystem = filesystem("local")
+        self.__is_s3 = False
 
         if self.results_dir.startswith("s3://"):
+            self.__is_s3 = True
             self.__duckdb_conn.install_extension("httpfs")
             self.__duckdb_conn.load_extension("httpfs")
 
@@ -46,14 +48,16 @@ class AsyncCutoutResults:
 
             self.__fs = filesystem("s3")
 
-        if not self.__fs.isdir(self.results_dir):
-            self.__fs.mkdir(self.results_dir)
+        if not self.__is_s3 and not self.__fs.isdir(self.results_dir):
+                self.__fs.mkdir(self.results_dir)
+
+    def __del__(self):
+        self.__duckdb_conn.close()
+        del self.__duckdb_conn
+        del self.__fs
 
     def __write_results_file(self, results: list[CutoutResponse], batch_num: int):
         results_fname = self.results_path_template.format(batch_num)
-        if self.__fs.exists(results_fname):
-            raise FileExistsError("Results file already exists, not overwriting")
-        self.__fs.touch(results_fname)
 
         results_py = [
             {
@@ -85,24 +89,7 @@ class AsyncCutoutResults:
         with self.__fs.open(results_fname, "wb") as f:
             pq.write_table(results_t, f)
 
-    def __update_size_file(self, new_count: int):
-        size_path = f"{self.results_dir}/size"
-        size_count = 0
-        if self.__fs.exists(size_path):
-            with self.__fs.open(size_path, "r") as f:
-                existing = f.read()
-            try:
-                size_count = int(existing.strip())
-            except Exception as e:
-                print(f"Error updating size file: {e}")
-                size_count = 0
-
-        size_count += new_count
-        with self.__fs.open(size_path, "w") as f:
-            f.write(str(size_count))
-
     def add_results(self, results: list[CutoutResponse], batch_num: int):
-        self.__update_size_file(len(results))
         self.__write_results_file(results, batch_num)
 
     def __get_results(self, page: int, size: int) -> pd.DataFrame:
