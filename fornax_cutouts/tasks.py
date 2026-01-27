@@ -1,7 +1,9 @@
 import asyncio
 import json
 import time
+import uuid
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
 import astrocut
@@ -201,6 +203,86 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
     return filter
 
 
+def execute_cutout(
+    source_file: str,
+    target: TargetPosition,
+    size: int | tuple[int, int],
+    output_format: list[str],
+    output_dir: str,
+    mission: str = "",
+) -> CutoutResponse:
+    """
+    Execute a cutout within the specific source file
+
+    Args:
+        source_file (str): Source file
+        target (TargetPosition): Target to center the cutout around
+        size (int | tuple[int, int]): Size of the cutout
+        output_format (list[str]): Formats of the resulting files (fits, jp(e)g)
+        output_dir (str): Destination directory.
+        mission (str, optional): The mission name (e.g., "ps1").
+            Defaults to "".
+    """
+
+    if isinstance(size, int):
+        size = (size, size)
+
+    cutout_prefix = urlparse(source_file).path
+    cutout_prefix = Path(cutout_prefix).stem
+
+    cutout = astrocut.FITSCutout(
+        input_files=source_file,
+        coordinates=f"{target[0]} {target[1]}",
+        cutout_size=size,
+        single_outfile=False,
+    )
+
+    with TemporaryDirectory(prefix=f"fornax-cutouts-{uuid.uuid4()}") as temp_output_dir:
+        fits_fname = ""
+        if "fits" in output_format:
+            fits_fname = cutout.write_as_fits(
+                output_dir=temp_output_dir,
+                cutout_prefix=cutout_prefix,
+            )[0]
+
+        img_fname = ""
+        if "jpg" in output_format or "jpeg" in output_format:
+            img_fname = cutout.write_as_img(
+                output_dir=temp_output_dir,
+                cutout_prefix=cutout_prefix,
+            )[0]
+
+        fs: AbstractFileSystem
+        output_is_s3 = output_dir.startswith("s3://")
+        if output_is_s3:
+            fs = filesystem("s3")
+        else:
+            fs = filesystem("local")
+
+        # Only create directories for local filesystem; S3 doesn't need them
+        # and the isdir/mkdir calls are expensive LIST operations
+        if output_is_s3 and not fs.isdir(output_dir):
+            fs.mkdir(output_dir)
+
+        fs.put(
+            lpath=temp_output_dir,
+            rpath=output_dir,
+            recursive=True,
+        )
+
+        fits_fname = fits_fname.replace(temp_output_dir, output_dir)
+        img_fname = img_fname.replace(temp_output_dir, output_dir)
+
+    return CutoutResponse(
+        mission=mission or "sync_cutout",
+        position=target,
+        size_px=size,
+        filter=get_fits_filter(cutout.fits_cutouts[0]),
+        fits=fits_fname,
+        preview=img_fname,
+    )
+
+
 @celery_app.task(bind=True, pydantic=True)
 def generate_cutout(  # noqa: C901
     self: Task,
@@ -252,8 +334,6 @@ def generate_cutout(  # noqa: C901
 
         time_task_start = time.time()
         time_start = time_task_start
-        if isinstance(size, int):
-            size = (size, size)
 
         if colorize:
             assert isinstance(source_file, list) and len(source_file) == 3, (
