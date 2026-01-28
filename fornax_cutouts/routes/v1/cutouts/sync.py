@@ -13,7 +13,7 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.constants import CUTOUT_STORAGE_IS_S3, CUTOUT_STORAGE_PREFIX
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
-from fornax_cutouts.tasks import execute_cutout
+from fornax_cutouts.tasks import generate_cutout, generate_color_preview
 
 sync_router = APIRouter(prefix="/cutouts")
 
@@ -38,6 +38,7 @@ class CutoutsSyncHandler:
         dec: Annotated[float, Query(description="Central Dec coordinate to generate cutout for")],
         size: Annotated[int, Query(description="Width and height of the cutout in pixels")],
         include_preview: Annotated[bool, Query(description="Include a JPEG preview of the cutout")] = True,
+        job_id: Annotated[str, Query(description="Job ID to generate the cutout for")] = "",
     ) -> CutoutResponse:
         """
         Generate a FITS and JPEG cutout for a specified source
@@ -46,11 +47,14 @@ class CutoutsSyncHandler:
         if include_preview:
             output_formats.append("jpeg")
 
-        output_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/sync/{uuid.uuid4().hex[:8]}"
+        if not job_id:
+            job_id = uuid.uuid4().hex[:8]
+
+        output_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/sync/{job_id}"
 
         try:
             ret = await asyncio.to_thread(
-                execute_cutout,
+                generate_cutout,
                 source_file=filename,
                 target=TargetPosition(ra, dec),
                 size=size,
@@ -66,39 +70,57 @@ class CutoutsSyncHandler:
 
         if CUTOUT_STORAGE_IS_S3:
             fs: AbstractFileSystem = filesystem("s3")
-            ret.fits = fs.sign(ret.fits, expiration=CONFIG.sync_ttl)
-            ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
+            if ret.fits:
+                ret.fits = fs.sign(ret.fits, expiration=CONFIG.sync_ttl)
+            if ret.preview:
+                ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
         else:
-            ret.fits = ret.fits.replace(CUTOUT_STORAGE_PREFIX, "")
-            ret.preview = ret.preview.replace(CUTOUT_STORAGE_PREFIX, "")
+            if ret.fits:
+                ret.fits = ret.fits.replace(CUTOUT_STORAGE_PREFIX, "")
+            if ret.preview:
+                ret.preview = ret.preview.replace(CUTOUT_STORAGE_PREFIX, "")
 
         return ret
 
-    # @sync_router.get("/sync/color")
-    # async def get_color_cutout(
-    #     self,
-    #     r: Annotated[str, Query(description="Red channel for a color cutout preview")],
-    #     g: Annotated[str, Query(description="Green channel for a color cutout preview")],
-    #     b: Annotated[str, Query(description="Blue channel for a color cutout preview")],
-    #     ra: Annotated[float, Query(description="Central RA coordinate to generate cutout for")],
-    #     dec: Annotated[float, Query(description="Central Dec coordinate to generate cutout for")],
-    #     size: Annotated[int, Query(description="Width and height of the cutout in pixels")],
-    # ) -> CutoutResponse:
-    #     """
-    #     Generate a color JPEG preview of a cutout
-    #     """
-    #     try:
-    #         return generate_cutout(
-    #             job_id="color_preview",
-    #             output_format=["jpeg"],
-    #             source_file=[r, g, b],
-    #             target=TargetPosition(ra, dec),
-    #             size=size,
-    #             colorize=True,
-    #             ttl=CONFIG.sync_ttl,
-    #         )
-    #     except InvalidQueryError as e:
-    #         raise HTTPException(
-    #             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-    #             detail=e,
-    #         )
+    @sync_router.get("/sync/color")
+    async def get_color_cutout(
+        self,
+        red: Annotated[str, Query(description="Red channel for a color cutout preview")],
+        green: Annotated[str, Query(description="Green channel for a color cutout preview")],
+        blue: Annotated[str, Query(description="Blue channel for a color cutout preview")],
+        ra: Annotated[float, Query(description="Central RA coordinate to generate cutout for")],
+        dec: Annotated[float, Query(description="Central Dec coordinate to generate cutout for")],
+        size: Annotated[int, Query(description="Width and height of the cutout in pixels")],
+        job_id: Annotated[str, Query(description="Job ID to generate the cutout for")] = "",
+    ) -> CutoutResponse:
+        """
+        Generate a color JPEG preview of a cutout
+        """
+        if not job_id:
+            job_id = uuid.uuid4().hex[:8]
+
+        output_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/sync/{job_id}"
+
+        try:
+            ret = await asyncio.to_thread(
+                generate_color_preview,
+                red=red,
+                green=green,
+                blue=blue,
+                target=TargetPosition(ra, dec),
+                size=size,
+                output_dir=output_dir,
+            )
+        except InvalidQueryError as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=e,
+            )
+
+        if CUTOUT_STORAGE_IS_S3:
+            fs: AbstractFileSystem = filesystem("s3")
+            ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
+        else:
+            ret.preview = ret.preview.replace(CUTOUT_STORAGE_PREFIX, "")
+
+        return ret

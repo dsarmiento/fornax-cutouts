@@ -116,7 +116,7 @@ def batch_cutouts(self: Task, job_id: str):
         for increment_id, desc in enumerate(descriptors):
             # Convert target list back to TargetPosition NamedTuple
             target = TargetPosition(ra=desc["target"][0], dec=desc["target"][1])
-            sig = generate_cutout.si(
+            sig = execute_cutout.si(
                 job_id=desc["job_id"],
                 source_file=desc["source_file"],
                 target=target,
@@ -203,7 +203,7 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
     return filter
 
 
-def execute_cutout(
+def generate_cutout(
     source_file: str,
     target: TargetPosition,
     size: int | tuple[int, int],
@@ -237,7 +237,7 @@ def execute_cutout(
         single_outfile=False,
     )
 
-    with TemporaryDirectory(prefix=f"fornax-cutouts-{uuid.uuid4()}") as temp_output_dir:
+    with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         fits_fname = ""
         if "fits" in output_format:
             fits_fname = cutout.write_as_fits(
@@ -261,17 +261,16 @@ def execute_cutout(
 
         # Only create directories for local filesystem; S3 doesn't need them
         # and the isdir/mkdir calls are expensive LIST operations
-        if output_is_s3 and not fs.isdir(output_dir):
+        if not output_is_s3 and not fs.isdir(output_dir):
             fs.mkdir(output_dir)
 
-        fs.put(
-            lpath=temp_output_dir,
-            rpath=output_dir,
-            recursive=True,
-        )
+        if fits_fname:
+            fs.put(lpath=fits_fname, rpath=output_dir)
+            fits_fname = fits_fname.replace(temp_output_dir, output_dir)
 
-        fits_fname = fits_fname.replace(temp_output_dir, output_dir)
-        img_fname = img_fname.replace(temp_output_dir, output_dir)
+        if img_fname:
+            fs.put(lpath=img_fname, rpath=output_dir)
+            img_fname = img_fname.replace(temp_output_dir, output_dir)
 
     return CutoutResponse(
         mission=mission or "sync_cutout",
@@ -282,9 +281,68 @@ def execute_cutout(
         preview=img_fname,
     )
 
+def generate_color_preview(
+    red: str,
+    green: str,
+    blue: str,
+    target: TargetPosition,
+    size: int | tuple[int, int],
+    output_dir: str,
+) -> CutoutResponse:
+    """
+    Generate a color preview of a cutout
+    """
+    if isinstance(size, int):
+        size = (size, size)
+
+    cutout_prefix = urlparse(red).path
+    cutout_prefix = Path(cutout_prefix).stem + "_color"
+
+    cutout = astrocut.FITSCutout(
+        input_files=[red, green, blue],
+        coordinates=f"{target[0]} {target[1]}",
+        cutout_size=size,
+        single_outfile=False,
+    )
+
+    with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
+        img_fname = cutout.write_as_img(
+            output_dir=temp_output_dir,
+            cutout_prefix=cutout_prefix,
+            colorize=True,
+        )
+
+        fs: AbstractFileSystem
+        output_is_s3 = output_dir.startswith("s3://")
+        if output_is_s3:
+            fs = filesystem("s3")
+        else:
+            fs = filesystem("local")
+
+        # Only create directories for local filesystem; S3 doesn't need them
+        # and the isdir/mkdir calls are expensive LIST operations
+        if not output_is_s3 and not fs.isdir(output_dir):
+            fs.mkdir(output_dir)
+
+        fs.put(lpath=img_fname, rpath=output_dir)
+
+        img_fname = img_fname.replace(temp_output_dir, output_dir)
+
+    return CutoutResponse(
+        mission="color_preview",
+        position=target,
+        size_px=size,
+        filter=ColorFilter(
+            red=get_fits_filter(cutout.fits_cutouts[0]),
+            green=get_fits_filter(cutout.fits_cutouts[1]),
+            blue=get_fits_filter(cutout.fits_cutouts[2]),
+        ),
+        preview=img_fname,
+    )
+
 
 @celery_app.task(bind=True, pydantic=True)
-def generate_cutout(  # noqa: C901
+def execute_cutout(  # noqa: C901
     self: Task,
     job_id: str,
     source_file: str | list[str],
@@ -461,6 +519,7 @@ def generate_cutout(  # noqa: C901
         time_start = time.time()
         fits_url = fits_fname.replace(temp_output_dir, rpath)
         img_url = img_fname.replace(temp_output_dir, rpath)
+
         if CUTOUT_STORAGE_IS_S3:
             if fits_url:
                 fits_url = fs.sign(fits_url, expiration=ttl)
