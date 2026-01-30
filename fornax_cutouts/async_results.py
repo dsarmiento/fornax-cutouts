@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass, field
 from io import BytesIO
+from typing import Any
 
 import boto3
 import duckdb
@@ -8,6 +9,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from astropy.io import votable
+from astropy.io.votable.tree import Info, Link
 from astropy.table import Table as AstroTable
 from fsspec import AbstractFileSystem, filesystem
 
@@ -101,18 +103,81 @@ class AsyncCutoutResults:
             print(f"Error getting results: {e}")
             return pd.DataFrame()
 
-    def to_py(self, page: int = 0, size: int = 100) -> list[CutoutResponse]:
-        df = self.__get_results(page, size)
-        return [CutoutResponse.model_validate(row.to_dict()) for _, row in df.iterrows()]
 
-    def to_csv(self, page: int = 0, size: int = 100) -> str:
-        df = self.__get_results(page, size)
+    def __get_pagination_metadata(self, page: int, limit: int) -> dict[str, dict[str, Any]]:
+        """
+        Generate pagination links for the current page.
+
+        Returns a dictionary with link IDs as keys and URLs as values.
+        """
+        try:
+            results_db = self.__duckdb_conn.read_parquet(self.results_path_template.format("*"))
+            total_items = results_db.count("*").fetchone()[0]
+            total_pages = (total_items + limit - 1) // limit
+        except duckdb.IOException:
+            total_pages = 0
+
+        base_url = f"/api/v0/cutouts/async/{self.job_id}/results/cutouts"
+        metadata = {
+            "metadata": {
+                "page": page,
+                "limit": limit,
+                "totalItems": total_items,
+                "totalPages": total_pages,
+                "currentPage": page + 1
+            },
+            "links": {
+                "self": f"{base_url}?page={page}&size={limit}",
+                "first": f"{base_url}?page=0&size={limit}",
+                "last": f"{base_url}?page={total_pages - 1}&size={limit}"
+            },
+        }
+
+        if page > 0:
+            metadata["links"]["prev"] = f"{base_url}?page={page - 1}&size={limit}"
+
+        if page < total_pages - 1:
+            metadata["links"]["next"] = f"{base_url}?page={page + 1}&size={limit}"
+
+        return metadata
+
+    def to_py(self, page: int = 0, limit: int = 100) -> dict:
+        df = self.__get_results(page, limit)
+        results = [CutoutResponse.model_validate(row.to_dict()) for _, row in df.iterrows()]
+
+        resp = self.__get_pagination_metadata(page, limit)
+        resp["results"] = results
+
+        return resp
+
+    def to_csv(self, page: int = 0, limit: int = 100) -> str:
+        df = self.__get_results(page, limit)
         return df.to_csv(index=False)
 
-    def to_votable(self, page: int = 0, size: int = 100) -> str:
-        df = self.__get_results(page, size)
+    def to_votable(self, page: int = 0, limit: int = 100) -> str:
+        df = self.__get_results(page, limit)
         astro_t = AstroTable.from_pandas(df)
         vo_t = votable.from_table(astro_t)
+
+        pagination_metadata = self.__get_pagination_metadata(page, limit)
+
+        for info_name, info_value in pagination_metadata["metadata"].items():
+            info = Info(
+                name=info_name,
+                value=str(info_value),
+            )
+            vo_t.infos.append(info)
+
+        for link_id, href in pagination_metadata["links"].items():
+            link = Link(
+                ID=link_id,
+                content_role="query",
+                content_type="application/xml",
+                href=href,
+                action="GET",
+            )
+            vo_t.resources[0].links.append(link)
+
         vo_io = BytesIO()
         vo_t.to_xml(vo_io)
         return vo_io.getvalue().decode()
