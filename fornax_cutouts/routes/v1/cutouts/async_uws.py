@@ -369,7 +369,7 @@ class CutoutsUWSHandler:
             int,
             Query(description="Page number to return", ge=0),
         ] = 0,
-        size: Annotated[
+        limit: Annotated[
             int,
             Query(description="Number of results per page", ge=1),
         ] = 100,
@@ -380,13 +380,13 @@ class CutoutsUWSHandler:
         job_results = self.uws_redis.get_job_cutout_results(job_id)
 
         if output_format == "json":
-            return job_results.to_py(page=page, size=size)
+            return job_results.to_py(page=page, limit=limit)
 
         if output_format == "csv":
-            return CsvResponse(job_results.to_csv(page=page, size=size))
+            return CsvResponse(job_results.to_csv(page=page, limit=limit))
 
         if output_format in ["votable", "xml"]:
-            return XmlResponse(job_results.to_votable(page=page, size=size))
+            return XmlResponse(job_results.to_votable(page=page, limit=limit))
 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
