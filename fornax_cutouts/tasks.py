@@ -208,7 +208,8 @@ def generate_cutout(
     size: int | tuple[int, int],
     output_format: list[str],
     output_dir: str,
-    mission: str = "",
+    mission: str = "sync_cutout",
+    metadata: dict = {},
 ) -> CutoutResponse:
     """
     Execute a cutout within the specific source file
@@ -220,7 +221,9 @@ def generate_cutout(
         output_format (list[str]): Formats of the resulting files (fits, jp(e)g)
         output_dir (str): Destination directory.
         mission (str, optional): The mission name (e.g., "ps1").
-            Defaults to "".
+            Defaults to "sync_cutout".
+        metadata (dict, optional): Mission-specific metadata dictionary.
+            Defaults to {}.
     """
 
     if isinstance(size, int):
@@ -272,12 +275,13 @@ def generate_cutout(
             img_fname = img_fname.replace(temp_output_dir, output_dir)
 
     return CutoutResponse(
-        mission=mission or "sync_cutout",
+        mission=mission,
         position=target,
         size_px=size,
-        filter=get_fits_filter(cutout.fits_cutouts[0]),
+        filter=metadata.pop("filter") or get_fits_filter(cutout.fits_cutouts[0]),
         fits=fits_fname,
         preview=img_fname,
+        mission_extras=metadata,
     )
 
 def generate_color_preview(
@@ -350,7 +354,7 @@ def execute_cutout(  # noqa: C901
     output_format: list[str],
     output_dir: str = "",
     mission: str = "",
-    metadata: dict | None = None,
+    metadata: dict = {},
 ) -> CutoutResponse:
     """
     Generate a cutout within the specific source file
@@ -365,7 +369,7 @@ def execute_cutout(  # noqa: C901
             Defaults to "".
         mission (str, optional): The mission name (e.g., "ps1").
             Defaults to "".
-        metadata (dict | None, optional): Mission-specific metadata dictionary.
+        metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to None.
     """
 
