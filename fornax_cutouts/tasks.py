@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 import uuid
 from pathlib import Path
@@ -22,6 +23,8 @@ from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.redis_uws import redis_uws_client
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
+logging.getLogger("astrocut").setLevel(logging.ERROR)
+logging.getLogger("astropy").setLevel(logging.ERROR)
 
 @celery_app.task(bind=True, ignore_result=True)
 def schedule_job(
@@ -31,6 +34,7 @@ def schedule_job(
     size: int,
     mission_params: dict[str, dict],
     output_format: list[str],
+    mode: str = "FITSCutout",
 ):
     async def task():
         r = redis_uws_client()
@@ -68,16 +72,20 @@ def schedule_job(
                     "ttl": CONFIG.async_ttl,
                     "mission": target_fname.mission,
                     "metadata": filename_obj.metadata,
+                    "mode": mode,
                 }
                 descriptors.append(descriptor)
 
         total_jobs = len(descriptors)
+
+        print(f"Total jobs: {total_jobs}")
 
         if total_jobs == 0:
             await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
             await r.set_end_time(job_id)
             return
 
+        print(f"Pushing {total_jobs} descriptors to pending queue")
         for descriptor in descriptors:
             await r.push_pending_descriptor(job_id, descriptor)
 
@@ -125,6 +133,7 @@ def batch_cutouts(self: Task, job_id: str):
                 output_dir=desc["output_dir"],
                 mission=desc["mission"],
                 metadata=desc.get("metadata"),
+                mode=desc.get("mode"),
             )
             sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}")
             cutout_sigs.append(sig)
@@ -210,6 +219,7 @@ def generate_cutout(
     output_dir: str,
     mission: str = "sync_cutout",
     metadata: dict = {},
+    mode: str = "FITSCutout",
 ) -> CutoutResponse:
     """
     Execute a cutout within the specific source file
@@ -232,27 +242,51 @@ def generate_cutout(
     cutout_prefix = urlparse(source_file).path
     cutout_prefix = Path(cutout_prefix).stem
 
-    cutout = astrocut.FITSCutout(
-        input_files=source_file,
-        coordinates=f"{target[0]} {target[1]}",
-        cutout_size=size,
-        single_outfile=False,
-    )
-
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         fits_fname = ""
-        if "fits" in output_format:
-            fits_fname = cutout.write_as_fits(
-                output_dir=temp_output_dir,
-                cutout_prefix=cutout_prefix,
-            )[0]
-
         img_fname = ""
-        if "jpg" in output_format or "jpeg" in output_format:
-            img_fname = cutout.write_as_img(
-                output_dir=temp_output_dir,
-                cutout_prefix=cutout_prefix,
-            )[0]
+
+        if mode == "FITSCutout":
+            cutout = astrocut.FITSCutout(
+                input_files=source_file,
+                coordinates=f"{target[0]} {target[1]}",
+                cutout_size=size,
+                single_outfile=False,
+            )
+
+            if "fits" in output_format:
+                fits_fname = cutout.write_as_fits(
+                    output_dir=temp_output_dir,
+                    cutout_prefix=cutout_prefix,
+                )[0]
+
+            if "jpg" in output_format or "jpeg" in output_format:
+                img_fname = cutout.write_as_img(
+                    output_dir=temp_output_dir,
+                    cutout_prefix=cutout_prefix,
+                )[0]
+
+        elif mode == "fits_cut":
+
+            if "fits" in output_format:
+                fits_fname = astrocut.fits_cut(
+                    source_file,
+                    f"{target[0]} {target[1]}",
+                    size,
+                    output_dir=temp_output_dir,
+                    cutout_prefix=cutout_prefix,
+                    single_outfile=True,
+                )
+
+            if "jpg" in output_format or "jpeg" in output_format:
+                img_fname = astrocut.img_cut(
+                    source_file,
+                    f"{target[0]} {target[1]}",
+                    size,
+                    output_dir=temp_output_dir,
+                    cutout_prefix=cutout_prefix,
+                    single_outfile=True,
+                )
 
         fs: AbstractFileSystem
         output_is_s3 = output_dir.startswith("s3://")
@@ -355,6 +389,7 @@ def execute_cutout(  # noqa: C901
     output_dir: str = "",
     mission: str = "",
     metadata: dict = {},
+    mode: str = "FITSCutout",
 ) -> CutoutResponse:
     """
     Generate a cutout within the specific source file
@@ -383,6 +418,7 @@ def execute_cutout(  # noqa: C901
         output_dir,
         mission,
         metadata,
+        mode,
     ):
 
         try:
@@ -394,6 +430,7 @@ def execute_cutout(  # noqa: C901
                 output_dir=output_dir,
                 mission=mission,
                 metadata=metadata,
+                mode=mode,
             )
 
         except InvalidQueryError:
@@ -424,6 +461,7 @@ def execute_cutout(  # noqa: C901
             output_dir=output_dir,
             mission=mission,
             metadata=metadata,
+            mode=mode,
         )
     )
 

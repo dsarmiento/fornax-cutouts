@@ -86,6 +86,13 @@ class CutoutsUWSHandler:
                 alias="RUNID",
             ),
         ] = "",
+        engine: Annotated[
+            str,
+            Form(
+                description="Engine to use for the request",
+                alias="ENGINE",
+            ),
+        ] = "FITSCutout",
     ):
         form = await request.form()
 
@@ -127,6 +134,7 @@ class CutoutsUWSHandler:
             "size": size,
             "output_format": output_format,
             "mission_params": mission_params,
+            "mode": engine,
         }
 
         await self.uws_redis.create_job(
