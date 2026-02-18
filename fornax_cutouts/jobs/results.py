@@ -25,7 +25,7 @@ class CutoutResults:
     job_id: str
 
     def __post_init__(self):
-        self.results_dir = f"{CONFIG.storage.prefix}/cutouts/{self.job_id}/results"
+        self.results_dir = f"{CONFIG.storage.prefix}/cutouts/async/{self.job_id}/results"
         self.results_path_template = f"{self.results_dir}/results_{{}}.parquet"
 
         self.__duckdb_conn = duckdb.connect()
