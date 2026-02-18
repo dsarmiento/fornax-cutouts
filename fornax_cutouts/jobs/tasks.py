@@ -1,8 +1,3 @@
-import asyncio
-import json
-import logging
-import time
-import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
@@ -14,17 +9,15 @@ from celery import Task, chord
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
-from fornax_cutouts.app.celery_app import celery_app, logger
+from fornax_cutouts.app.celery_app import celery_app, logger, redis_client_factory
 from fornax_cutouts.config import CONFIG
-from fornax_cutouts.constants import CUTOUT_STORAGE_IS_S3, CUTOUT_STORAGE_PREFIX
+from fornax_cutouts.jobs.redis import SyncRedisCutoutJob
+from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse
 from fornax_cutouts.sources import cutout_registry
-from fornax_cutouts.utils.redis_uws import redis_uws_client
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
-logging.getLogger("astrocut").setLevel(logging.ERROR)
-logging.getLogger("astropy").setLevel(logging.ERROR)
 
 @celery_app.task(bind=True, ignore_result=True)
 def schedule_job(
@@ -36,72 +29,61 @@ def schedule_job(
     output_format: list[str],
     mode: str = "FITSCutout",
 ):
-    async def task():
-        r = redis_uws_client()
+    r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
-        await r.update_job_phase(job_id, ExecutionPhase.QUEUED)
+    r.update_job_phase(ExecutionPhase.QUEUED)
 
-        resolved_position = resolve_positions(position)
+    resolved_position = resolve_positions(position)
 
-        validated_params = cutout_registry.validate_mission_params(mission_params=mission_params, size=size)
+    validated_params = cutout_registry.validate_mission_params(mission_params=mission_params, size=size)
 
-        valid_mission_params: dict[str, dict] = {}
-        for mission, is_valid in validated_params.items():
-            if not is_valid:
-                logger.error(f"{mission!r} params are not valid, please recheck and resubmit.")
-            else:
-                valid_mission_params[mission] = mission_params[mission]
+    valid_mission_params: dict[str, dict] = {}
+    for mission, is_valid in validated_params.items():
+        if not is_valid:
+            logger.error(f"{mission!r} params are not valid, please recheck and resubmit.")
+        else:
+            valid_mission_params[mission] = mission_params[mission]
 
-        target_fnames = cutout_registry.get_target_filenames(
-            position=resolved_position,
-            mission_params=valid_mission_params,
-            size=size,
-            include_metadata=True,
-        )
+    target_fnames = cutout_registry.get_target_filenames(
+        position=resolved_position,
+        mission_params=valid_mission_params,
+        size=size,
+        include_metadata=True,
+    )
 
-        descriptors = []
-        for target_fname in target_fnames:
-            for filename_obj in target_fname.filenames:
-                descriptor = {
-                    "job_id": job_id,
-                    "source_file": filename_obj.filename,
-                    "target": [target_fname.target.ra, target_fname.target.dec],  # Convert NamedTuple to list for JSON
-                    "size": target_fname.size or size,
-                    "output_format": output_format,
-                    "output_dir": f"{CUTOUT_STORAGE_PREFIX}/cutouts/async/{job_id}/{target_fname.mission}",
-                    "ttl": CONFIG.async_ttl,
-                    "mission": target_fname.mission,
-                    "metadata": filename_obj.metadata,
-                    "mode": mode,
-                }
-                descriptors.append(descriptor)
+    descriptors = []
+    for target_fname in target_fnames:
+        for filename_obj in target_fname.filenames:
+            descriptor = {
+                "job_id": job_id,
+                "source_file": filename_obj.filename,
+                "target": [target_fname.target.ra, target_fname.target.dec],  # Convert NamedTuple to list for JSON
+                "size": target_fname.size or size,
+                "output_format": output_format,
+                "output_dir": f"{CONFIG.storage.prefix}/cutouts/async/{job_id}/{target_fname.mission}",
+                "ttl": CONFIG.async_ttl,
+                "mission": target_fname.mission,
+                "metadata": filename_obj.metadata,
+                "mode": mode,
+            }
+            descriptors.append(descriptor)
 
-        total_jobs = len(descriptors)
+    total_jobs = len(descriptors)
 
-        print(f"Total jobs: {total_jobs}")
+    if total_jobs == 0:
+        r.set_start_time()
+        r.set_end_time()
+        r.update_job_phase(ExecutionPhase.COMPLETED)
+        return
 
-        if total_jobs == 0:
-            await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
-            await r.set_end_time(job_id)
-            return
+    r.push_pending_tasks(descriptors)
+    r.set_total_task_count(total_jobs)
+    r.update_job_phase(ExecutionPhase.EXECUTING)
+    r.set_start_time()
 
-        print(f"Pushing {total_jobs} descriptors to pending queue")
-        for descriptor in descriptors:
-            await r.push_pending_descriptor(job_id, descriptor)
-
-        await r.set_expected_results(job_id, total_jobs)
-        await r.reset_completed_count(job_id)
-        await r.reset_batch_num(job_id)
-        await r.reset_task_failures(job_id, "generate_cutout")
-
-        await r.update_job_phase(job_id, ExecutionPhase.EXECUTING)
-        await r.set_start_time(job_id)
-
-        batch_cutouts_task = batch_cutouts.s(job_id=job_id)
-        batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-0")
-        batch_cutouts_task.delay()
-
-    asyncio.run(task())
+    batch_cutouts_task = batch_cutouts.s(job_id=job_id)
+    batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-0")
+    batch_cutouts_task.delay()
 
 
 @celery_app.task(bind=True, ignore_result=True)
@@ -110,40 +92,39 @@ def batch_cutouts(self: Task, job_id: str):
     Chunked batcher: pops descriptors from Redis in batches and creates generate_cutout tasks
     using a Celery chord. The chord callback (write_results) handles completion and looping back.
     """
-    async def task():
-        r = redis_uws_client()
+    r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
-        batch_num = await r.get_and_increment_batch_num(job_id)
+    batch_num = r.increment_batch_num()
 
-        descriptors = await r.pop_pending_descriptors(job_id, max_items=CONFIG.worker.batch_size)
-        if not descriptors:
-            return
+    descriptors = r.pop_pending_tasks(CONFIG.worker.batch_size)
+    if not descriptors:
+        return
+    r.increment_queued_task_count(len(descriptors))
 
-        # Build signatures for all cutout tasks in this batch
-        cutout_sigs = []
-        for increment_id, desc in enumerate(descriptors):
-            # Convert target list back to TargetPosition NamedTuple
-            target = TargetPosition(ra=desc["target"][0], dec=desc["target"][1])
-            sig = execute_cutout.si(
-                job_id=desc["job_id"],
-                source_file=desc["source_file"],
-                target=target,
-                size=desc["size"],
-                output_format=desc["output_format"],
-                output_dir=desc["output_dir"],
-                mission=desc["mission"],
-                metadata=desc.get("metadata"),
-                mode=desc.get("mode"),
-            )
-            sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}")
-            cutout_sigs.append(sig)
+    # Build signatures for all cutout tasks in this batch
+    cutout_sigs = []
+    for increment_id, desc in enumerate(descriptors):
 
-        # Use chord to run all cutout tasks in parallel, then call write_results with their results
-        write_results_sig = write_results.s(job_id=job_id)
-        write_results_sig.set(task_id=f"write_results-{job_id}-{batch_num}")
-        chord(cutout_sigs)(write_results_sig)
+        # Convert target list back to TargetPosition NamedTuple
+        target = TargetPosition(ra=desc["target"][0], dec=desc["target"][1])
+        sig = execute_cutout.si(
+            job_id=desc["job_id"],
+            source_file=desc["source_file"],
+            target=target,
+            size=desc["size"],
+            output_format=desc["output_format"],
+            output_dir=desc["output_dir"],
+            mission=desc["mission"],
+            metadata=desc.get("metadata"),
+            mode=desc.get("mode"),
+        )
+        sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}")
+        cutout_sigs.append(sig)
 
-    asyncio.run(task())
+    # Use chord to run all cutout tasks in parallel, then call write_results with their results
+    write_results_sig = write_results.s(job_id=job_id)
+    write_results_sig.set(task_id=f"write_results-{job_id}-{batch_num}")
+    chord(cutout_sigs)(write_results_sig)
 
 
 @celery_app.task(bind=True)
@@ -156,48 +137,43 @@ def write_results(self: Task, results: list[CutoutResponse | dict | None], job_i
         results: List of CutoutResponse objects (or dicts/None for failed tasks) from the chord
         job_id: The job ID to write results for
     """
-    async def task():
-        r = redis_uws_client()
+    r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
-        # Filter out None/failed results and validate
-        valid_results = [rp for rp in results if rp is not None]
-        cutout_results = []
-        for rp in valid_results:
-            if isinstance(rp, dict):
-                cutout_results.append(CutoutResponse.model_validate(rp))
-            elif isinstance(rp, CutoutResponse):
-                cutout_results.append(rp)
-            else:
-                # Skip invalid result types
-                continue
+    # Filter out None/failed results and validate
+    cutout_results = []
+    for rp in results:
+        if rp is None:
+            continue
+        elif isinstance(rp, dict):
+            cutout_results.append(CutoutResponse.model_validate(rp))
+        elif isinstance(rp, CutoutResponse):
+            cutout_results.append(rp)
+        else:
+            continue
 
-        # Write results to Parquet storage if we have any
-        if cutout_results:
-            results_writer = r.get_job_cutout_results(job_id)
-            batch_num = await r.get_and_increment_batch_num(job_id)
-            results_writer.add_results(cutout_results, batch_num=batch_num)
+    # Write results to Parquet storage if we have any
+    if cutout_results:
+        results_writer = CutoutResults(job_id)
+        batch_num = r.get_batch_num()
+        results_writer.add_results(results=cutout_results, batch_num=batch_num)
 
-        # Check if job is complete
-        expected = await r.get_expected_results(job_id)
-        completed = await r.get_completed_count(job_id)
-        failed_generate = await r.get_task_failures(job_id, "generate_cutout")
-        pending = await r.get_pending_count(job_id)
+    # Check if job is complete and update job phase
+    job_status = r.get_job_result_status()
+    completed_tasks = job_status["completed_jobs"]
+    failed_tasks = job_status["failed_jobs"]
+    pending_tasks = job_status["pending_jobs"]
+    expected_total = job_status["total_jobs"]
+    total_completed = completed_tasks + failed_tasks
 
-        effective_completed = completed + failed_generate
+    if total_completed >= expected_total and pending_tasks == 0:
+        r.update_job_phase(ExecutionPhase.COMPLETED)
+        r.set_end_time()
 
-        if effective_completed >= expected and pending == 0:
-            # All work is done
-            await r.update_job_phase(job_id, ExecutionPhase.COMPLETED)
-            await r.set_end_time(job_id)
-        elif pending > 0:
-            # More descriptors remain, batch next batch
-            # Get the next batch number (current + 1) for task_id
-            next_batch = await r.get_batch_num(job_id) + 1
-            batch_cutouts_task = batch_cutouts.s(job_id=job_id)
-            batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-{next_batch}")
-            batch_cutouts_task.delay()
-
-    asyncio.run(task())
+    elif pending_tasks > 0:
+        next_batch = r.increment_batch_num()
+        batch_cutouts_task = batch_cutouts.s(job_id=job_id)
+        batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-{next_batch}")
+        batch_cutouts_task.delay()
 
 
 def get_fits_filter(fits_cutout: HDUList) -> str | None:
@@ -379,7 +355,7 @@ def generate_color_preview(
 
 
 @celery_app.task(bind=True, pydantic=True)
-def execute_cutout(  # noqa: C901
+def execute_cutout(
     self: Task,
     job_id: str,
     source_file: str,
@@ -407,53 +383,15 @@ def execute_cutout(  # noqa: C901
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to None.
     """
+    r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
-    async def task(
-        self: Task,
-        job_id,
-        source_file,
-        target,
-        size,
-        output_format,
-        output_dir,
-        mission,
-        metadata,
-        mode,
-    ):
+    r.decrement_queued_task_count()
+    r.increment_executing_task_count()
 
-        try:
-            resp = generate_cutout(
-                source_file=source_file,
-                target=target,
-                size=size,
-                output_format=output_format,
-                output_dir=output_dir,
-                mission=mission,
-                metadata=metadata,
-                mode=mode,
-            )
+    print(f"output_dir: {output_dir}")
 
-        except InvalidQueryError:
-            uws_client = redis_uws_client()
-            await uws_client.increment_task_failures(job_id, "generate_cutout")
-
-            await uws_client.close()
-            del uws_client
-
-            return
-
-        uws_client = redis_uws_client()
-        await uws_client.increment_completed(job_id, amount=1)
-
-        await uws_client.close()
-        del uws_client
-
-        return resp
-
-    resp = asyncio.run(
-        task(
-            self=self,
-            job_id=job_id,
+    try:
+        resp = generate_cutout(
             source_file=source_file,
             target=target,
             size=size,
@@ -463,6 +401,26 @@ def execute_cutout(  # noqa: C901
             metadata=metadata,
             mode=mode,
         )
-    )
+
+    except InvalidQueryError as e:
+        r.decrement_executing_task_count()
+        r.push_failed_task(
+            task_kwargs={
+                "job_id": job_id,
+                "source_file": source_file,
+                "target": target,
+                "size": size,
+                "output_format": output_format,
+                "output_dir": output_dir,
+                "mission": mission,
+                "metadata": metadata,
+                "mode": mode,
+            },
+            error_message=str(e),
+        )
+        return None
+
+    r.decrement_executing_task_count()
+    r.increment_completed_task_count()
 
     return resp

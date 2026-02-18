@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
@@ -13,17 +15,17 @@ from astropy.io.votable.tree import Info, Link
 from astropy.table import Table as AstroTable
 from fsspec import AbstractFileSystem, filesystem
 
-from fornax_cutouts.constants import AWS_S3_REGION, CUTOUT_STORAGE_PREFIX
+from fornax_cutouts.config import CONFIG
+from fornax_cutouts.constants import AWS_S3_REGION
 from fornax_cutouts.models.cutouts import CutoutResponse
 
 
 @dataclass
-class AsyncCutoutResults:
+class CutoutResults:
     job_id: str
-    results_dir: str = field(init=False)
 
     def __post_init__(self):
-        self.results_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/{self.job_id}/results"
+        self.results_dir = f"{CONFIG.storage.prefix}/cutouts/{self.job_id}/results"
         self.results_path_template = f"{self.results_dir}/results_{{}}.parquet"
 
         self.__duckdb_conn = duckdb.connect()
