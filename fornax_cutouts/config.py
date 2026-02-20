@@ -16,11 +16,25 @@ class RedisConfig(BaseModel):
     def uri(self):
         return f"redis{'s' if self.use_ssl else ''}://{self.host}:{self.port}/0"
 
+    @property
+    def connection_kwargs(self):
+        return {
+            "host": self.host,
+            "port": self.port,
+            "ssl": self.use_ssl
+        }
+
 
 class WorkerConfig(BaseModel):
     redis_prefix: str = "cutouts"
     batch_size: int = 5
 
+class StorageConfig(BaseModel):
+    prefix: str = "/tmp"
+
+    @property
+    def is_s3(self):
+        return self.prefix.startswith("s3://")
 
 class FornaxCutoutsConfig(BaseSettings):
     model_config = SettingsConfigDict(
@@ -37,6 +51,8 @@ class FornaxCutoutsConfig(BaseSettings):
 
     log_level: str = "info"
     source_path: Path
+
+    storage: StorageConfig = Field(default_factory=StorageConfig)
 
 
 CONFIG = FornaxCutoutsConfig()
