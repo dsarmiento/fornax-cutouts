@@ -218,71 +218,85 @@ def generate_cutout(
     cutout_prefix = urlparse(source_file).path
     cutout_prefix = Path(cutout_prefix).stem
 
-    with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
-        fits_fname = ""
-        img_fname = ""
+    fs: AbstractFileSystem
+    output_is_s3 = output_dir.startswith("s3://")
+    if output_is_s3:
+        fs = filesystem("s3")
+    else:
+        fs = filesystem("local")
 
-        if mode == "FITSCutout":
-            cutout = astrocut.FITSCutout(
-                input_files=source_file,
-                coordinates=f"{target[0]} {target[1]}",
-                cutout_size=size,
-                single_outfile=False,
-            )
+    # Only create directories for local filesystem; S3 doesn't need them
+    # and the isdir/mkdir calls are expensive LIST operations
+    if not output_is_s3 and not fs.isdir(output_dir):
+        fs.mkdir(output_dir)
 
-            if "fits" in output_format:
-                fits_fname = cutout.write_as_fits(
-                    output_dir=temp_output_dir,
-                    cutout_prefix=cutout_prefix,
-                )[0]
+    if mode == "in_memory":
+        if "fits" in output_format:
+            cutout = astrocut.fits_cut(
+                source_file,
+                f"{target[0]} {target[1]}",
+                size,
+                memory_only=True,
+            )[0]
 
-            if "jpg" in output_format or "jpeg" in output_format:
-                img_fname = cutout.write_as_img(
-                    output_dir=temp_output_dir,
-                    cutout_prefix=cutout_prefix,
-                )[0]
+            with fs.open(f"{output_dir}/{cutout_prefix}.fits", "wb") as f:
+                cutout.writeto(f)
 
-        elif mode == "fits_cut":
+    else:
+        with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
+            fits_fname = ""
+            img_fname = ""
 
-            if "fits" in output_format:
-                fits_fname = astrocut.fits_cut(
-                    source_file,
-                    f"{target[0]} {target[1]}",
-                    size,
-                    output_dir=temp_output_dir,
-                    cutout_prefix=cutout_prefix,
-                    single_outfile=True,
+            print(f"mode: {mode}")
+            if mode == "FITSCutout":
+                cutout = astrocut.FITSCutout(
+                    input_files=source_file,
+                    coordinates=f"{target[0]} {target[1]}",
+                    cutout_size=size,
+                    single_outfile=False,
                 )
 
-            if "jpg" in output_format or "jpeg" in output_format:
-                img_fname = astrocut.img_cut(
-                    source_file,
-                    f"{target[0]} {target[1]}",
-                    size,
-                    output_dir=temp_output_dir,
-                    cutout_prefix=cutout_prefix,
-                    single_outfile=True,
-                )
+                if "fits" in output_format:
+                    fits_fname = cutout.write_as_fits(
+                        output_dir=temp_output_dir,
+                        cutout_prefix=cutout_prefix,
+                    )[0]
 
-        fs: AbstractFileSystem
-        output_is_s3 = output_dir.startswith("s3://")
-        if output_is_s3:
-            fs = filesystem("s3")
-        else:
-            fs = filesystem("local")
+                if "jpg" in output_format or "jpeg" in output_format:
+                    img_fname = cutout.write_as_img(
+                        output_dir=temp_output_dir,
+                        cutout_prefix=cutout_prefix,
+                    )[0]
 
-        # Only create directories for local filesystem; S3 doesn't need them
-        # and the isdir/mkdir calls are expensive LIST operations
-        if not output_is_s3 and not fs.isdir(output_dir):
-            fs.mkdir(output_dir)
+            elif mode == "fits_cut":
 
-        if fits_fname:
-            fs.put(lpath=fits_fname, rpath=output_dir)
-            fits_fname = fits_fname.replace(temp_output_dir, output_dir)
+                if "fits" in output_format:
+                    fits_fname = astrocut.fits_cut(
+                        source_file,
+                        f"{target[0]} {target[1]}",
+                        size,
+                        output_dir=temp_output_dir,
+                        cutout_prefix=cutout_prefix,
+                        single_outfile=True,
+                    )
 
-        if img_fname:
-            fs.put(lpath=img_fname, rpath=output_dir)
-            img_fname = img_fname.replace(temp_output_dir, output_dir)
+                if "jpg" in output_format or "jpeg" in output_format:
+                    img_fname = astrocut.img_cut(
+                        source_file,
+                        f"{target[0]} {target[1]}",
+                        size,
+                        output_dir=temp_output_dir,
+                        cutout_prefix=cutout_prefix,
+                        single_outfile=True,
+                    )
+
+            if fits_fname:
+                fs.put(lpath=fits_fname, rpath=output_dir)
+                fits_fname = fits_fname.replace(temp_output_dir, output_dir)
+
+            if img_fname:
+                fs.put(lpath=img_fname, rpath=output_dir)
+                img_fname = img_fname.replace(temp_output_dir, output_dir)
 
     return CutoutResponse(
         mission=mission,
