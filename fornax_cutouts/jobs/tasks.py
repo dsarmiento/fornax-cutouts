@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
 import astrocut
+import time
 from astrocut.exceptions import InvalidQueryError
 from astropy.io.fits.hdu.hdulist import HDUList
 from celery import Task, chord
@@ -212,6 +213,9 @@ def generate_cutout(
             Defaults to {}.
     """
 
+    timings = {}
+    timings["start_time"] = time.time()
+
     if isinstance(size, int):
         size = (size, size)
 
@@ -230,6 +234,8 @@ def generate_cutout(
     if not output_is_s3 and not fs.isdir(output_dir):
         fs.mkdir(output_dir)
 
+    timings["cutout_start_time"] = time.time()
+
     if mode == "in_memory":
         if "fits" in output_format:
             cutout = astrocut.fits_cut(
@@ -239,9 +245,12 @@ def generate_cutout(
                 memory_only=True,
             )[0]
 
+            timings["in_memory_time"] = time.time() - timings["cutout_start_time"]
+
             with fs.open(f"{output_dir}/{cutout_prefix}.fits", "wb") as f:
                 cutout.writeto(f)
 
+            timings["in_memory_write_time"] = time.time() - timings["in_memory_time"]
     else:
         with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
             fits_fname = ""
@@ -249,6 +258,7 @@ def generate_cutout(
 
             print(f"mode: {mode}")
             if mode == "FITSCutout":
+                timings["FITSCutout_start_time"] = time.time()
                 cutout = astrocut.FITSCutout(
                     input_files=source_file,
                     coordinates=f"{target[0]} {target[1]}",
@@ -268,7 +278,10 @@ def generate_cutout(
                         cutout_prefix=cutout_prefix,
                     )[0]
 
+                timings["cutout_time"] = time.time() - timings["FITSCutout_start_time"]
+
             elif mode == "fits_cut":
+                timings["fits_cut_start_time"] = time.time()
 
                 if "fits" in output_format:
                     fits_fname = astrocut.fits_cut(
@@ -290,6 +303,8 @@ def generate_cutout(
                         single_outfile=True,
                     )
 
+                timings["cutout_time"] = time.time() - timings["fits_cut_start_time"]
+
             if fits_fname:
                 fs.put(lpath=fits_fname, rpath=output_dir)
                 fits_fname = fits_fname.replace(temp_output_dir, output_dir)
@@ -297,6 +312,11 @@ def generate_cutout(
             if img_fname:
                 fs.put(lpath=img_fname, rpath=output_dir)
                 img_fname = img_fname.replace(temp_output_dir, output_dir)
+
+            timings["write_time"] = time.time() - timings["cutout_start_time"]
+
+    timings["total_time"] = time.time() - timings["start_time"]
+    logger.info(timings)
 
     return CutoutResponse(
         mission=mission,
@@ -397,13 +417,14 @@ def execute_cutout(
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to None.
     """
+    timings = {}
+    timings["start_time"] = time.time()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
+    timings["redis_factory_time"] = time.time() - timings["start_time"]
 
     r.decrement_queued_task_count()
     r.increment_executing_task_count()
-
-    print(f"output_dir: {output_dir}")
-
+    timings["status_update_time"] = time.time() - timings["redis_factory_time"]
     try:
         resp = generate_cutout(
             source_file=source_file,
@@ -415,7 +436,7 @@ def execute_cutout(
             metadata=metadata,
             mode=mode,
         )
-
+        timings["cutout_time"] = time.time() - timings["status_update_time"]
     except InvalidQueryError as e:
         r.decrement_executing_task_count()
         r.push_failed_task(
@@ -432,9 +453,13 @@ def execute_cutout(
             },
             error_message=str(e),
         )
+        timings["failed_task_time"] = time.time() - timings["status_update_time"]
+        logger.error(f"Failed to generate cutout for job {job_id}: {e}")
+        logger.info(timings)
         return None
 
     r.decrement_executing_task_count()
     r.increment_completed_task_count()
-
+    timings["completed_task_time"] = time.time() - timings["status_update_time"]
+    logger.info(timings)
     return resp
