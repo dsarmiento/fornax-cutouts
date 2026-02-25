@@ -94,7 +94,7 @@ class CutoutsUWSHandler:
                 description="Engine to use for the request",
                 alias="ENGINE",
             ),
-        ] = "FITSCutout",
+        ] = "fits_cut",
     ):
         form = await request.form()
 
