@@ -1,9 +1,9 @@
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
 import astrocut
-import time
 from astrocut.exceptions import InvalidQueryError
 from astropy.io.fits.hdu.hdulist import HDUList
 from celery import Task, chord
@@ -28,7 +28,7 @@ def schedule_job(
     size: int,
     mission_params: dict[str, dict],
     output_format: list[str],
-    mode: str = "FITSCutout",
+    mode: str = "fits_cut",
 ):
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
@@ -196,7 +196,7 @@ def generate_cutout(
     output_dir: str,
     mission: str = "sync_cutout",
     metadata: dict = {},
-    mode: str = "FITSCutout",
+    mode: str = "fits_cut",
 ) -> CutoutResponse:
     """
     Execute a cutout within the specific source file
@@ -214,7 +214,7 @@ def generate_cutout(
     """
 
     timings = {}
-    timings["start_time"] = time.time()
+    start_time = time.time()
 
     if isinstance(size, int):
         size = (size, size)
@@ -234,7 +234,7 @@ def generate_cutout(
     if not output_is_s3 and not fs.isdir(output_dir):
         fs.mkdir(output_dir)
 
-    timings["cutout_start_time"] = time.time()
+    timings["cutout_start_time"] = time.time() - start_time
 
     if mode == "in_memory":
         if "fits" in output_format:
@@ -258,7 +258,7 @@ def generate_cutout(
 
             print(f"mode: {mode}")
             if mode == "FITSCutout":
-                timings["FITSCutout_start_time"] = time.time()
+                timings["FITSCutout_start_time"] = time.time() - timings["cutout_start_time"]
                 cutout = astrocut.FITSCutout(
                     input_files=source_file,
                     coordinates=f"{target[0]} {target[1]}",
@@ -281,7 +281,7 @@ def generate_cutout(
                 timings["cutout_time"] = time.time() - timings["FITSCutout_start_time"]
 
             elif mode == "fits_cut":
-                timings["fits_cut_start_time"] = time.time()
+                timings["fits_cut_start_time"] = time.time() - timings["cutout_start_time"]
 
                 if "fits" in output_format:
                     fits_fname = astrocut.fits_cut(
@@ -315,7 +315,7 @@ def generate_cutout(
 
             timings["write_time"] = time.time() - timings["cutout_start_time"]
 
-    timings["total_time"] = time.time() - timings["start_time"]
+    timings["total_time"] = time.time() - start_time
     logger.info(timings)
 
     return CutoutResponse(
@@ -399,7 +399,7 @@ def execute_cutout(
     output_dir: str = "",
     mission: str = "",
     metadata: dict = {},
-    mode: str = "FITSCutout",
+    mode: str = "fits_cut",
 ) -> CutoutResponse:
     """
     Generate a cutout within the specific source file
@@ -418,9 +418,9 @@ def execute_cutout(
             Defaults to None.
     """
     timings = {}
-    timings["start_time"] = time.time()
+    start_time = time.time()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
-    timings["redis_factory_time"] = time.time() - timings["start_time"]
+    timings["redis_factory_time"] = time.time() - start_time
 
     r.decrement_queued_task_count()
     r.increment_executing_task_count()
