@@ -88,13 +88,7 @@ class CutoutsUWSHandler:
                 alias="RUNID",
             ),
         ] = "",
-        engine: Annotated[
-            str,
-            Form(
-                description="Engine to use for the request",
-                alias="ENGINE",
-            ),
-        ] = "fits_cut",
+        engine: Annotated[str, Form()] = "fits_cut",
     ):
         form = await request.form()
 
