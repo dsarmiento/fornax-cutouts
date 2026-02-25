@@ -236,6 +236,9 @@ def generate_cutout(
 
     init_time = time.time()
 
+    fits_fname = ""
+    img_fname = ""
+
     if mode == "in_memory":
         if "fits" in output_format:
             cutout_start_time = time.time()
@@ -247,16 +250,13 @@ def generate_cutout(
             )[0]
 
             cutout_time = time.time()
+            fits_fname = f"{output_dir}/{cutout_prefix}.fits"
 
-            with fs.open(f"{output_dir}/{cutout_prefix}.fits", "wb") as f:
+            with fs.open(fits_fname, "wb") as f:
                 cutout.writeto(f)
-
             write_time = time.time()
     else:
         with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
-            fits_fname = ""
-            img_fname = ""
-
             if mode == "FITSCutout":
                 cutout_start_time = time.time()
                 cutout = astrocut.FITSCutout(
@@ -444,7 +444,7 @@ def execute_cutout(
             mode=mode,
         )
         cutout_time = time.time()
-    except InvalidQueryError as e:
+    except Exception as e:
         r.decrement_executing_task_count()
         r.push_failed_task(
             task_kwargs={
