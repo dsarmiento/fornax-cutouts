@@ -313,7 +313,7 @@ def generate_cutout(
                 fs.put(lpath=img_fname, rpath=output_dir)
                 img_fname = img_fname.replace(temp_output_dir, output_dir)
 
-            timings["write_time"] = time.time() - timings["cutout_start_time"]
+            timings["write_time"] = time.time() - timings["cutout_time"]
 
     timings["total_time"] = time.time() - start_time
     logger.info(timings)
