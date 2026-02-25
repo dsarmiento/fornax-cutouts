@@ -30,13 +30,17 @@ def schedule_job(
     output_format: list[str],
     mode: str = "fits_cut",
 ):
+    start_time = time.time()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
     r.update_job_phase(ExecutionPhase.QUEUED)
+    redis_update_time = time.time()
 
     resolved_position = resolve_positions(position)
+    resolve_positions_time = time.time()
 
     validated_params = cutout_registry.validate_mission_params(mission_params=mission_params, size=size)
+
 
     valid_mission_params: dict[str, dict] = {}
     for mission, is_valid in validated_params.items():
@@ -44,6 +48,8 @@ def schedule_job(
             logger.error(f"{mission!r} params are not valid, please recheck and resubmit.")
         else:
             valid_mission_params[mission] = mission_params[mission]
+    validate_mission_params_time = time.time()
+
 
     target_fnames = cutout_registry.get_target_filenames(
         position=resolved_position,
@@ -51,6 +57,7 @@ def schedule_job(
         size=size,
         include_metadata=True,
     )
+    get_target_filenames_time = time.time()
 
     descriptors = []
     for target_fname in target_fnames:
@@ -70,6 +77,7 @@ def schedule_job(
             descriptors.append(descriptor)
 
     total_jobs = len(descriptors)
+    generate_descriptors_time = time.time()
 
     if total_jobs == 0:
         r.set_start_time()
@@ -78,14 +86,30 @@ def schedule_job(
         return
 
     r.push_pending_tasks(descriptors)
+    push_pending_tasks_time = time.time()
     r.set_total_task_count(total_jobs)
     r.update_job_phase(ExecutionPhase.EXECUTING)
     r.set_start_time()
+    metadata_update_time = time.time()
 
     batch_cutouts_task = batch_cutouts.s(job_id=job_id)
     batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-0")
     batch_cutouts_task.delay()
 
+    batch_cutouts_task_time = time.time()
+
+    timings = {
+        "schedule_job_update_time": redis_update_time - start_time,
+        "resolve_positions_time": resolve_positions_time - redis_update_time,
+        "validate_mission_params_time": validate_mission_params_time - resolve_positions_time,
+        "get_target_filenames_time": get_target_filenames_time - validate_mission_params_time,
+        "generate_descriptors_time": generate_descriptors_time - get_target_filenames_time,
+        "push_pending_tasks_time": push_pending_tasks_time - generate_descriptors_time,
+        "metadata_update_time": metadata_update_time - push_pending_tasks_time,
+        "batch_cutouts_task_time": batch_cutouts_task_time - metadata_update_time,
+        "schedule_job_total_time": batch_cutouts_task_time - start_time,
+    }
+    logger.info(timings)
 
 @celery_app.task(bind=True, ignore_result=True)
 def batch_cutouts(self: Task, job_id: str):
@@ -93,14 +117,19 @@ def batch_cutouts(self: Task, job_id: str):
     Chunked batcher: pops descriptors from Redis in batches and creates generate_cutout tasks
     using a Celery chord. The chord callback (write_results) handles completion and looping back.
     """
+    start_time = time.time()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
     batch_num = r.increment_batch_num()
+    batch_num_time = time.time()
 
     descriptors = r.pop_pending_tasks(CONFIG.worker.batch_size)
+    pop_pending_tasks_time = time.time()
+
     if not descriptors:
         return
     r.increment_queued_task_count(len(descriptors))
+    increment_queued_task_count_time = time.time()
 
     # Build signatures for all cutout tasks in this batch
     cutout_sigs = []
@@ -122,11 +151,23 @@ def batch_cutouts(self: Task, job_id: str):
         sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}")
         cutout_sigs.append(sig)
 
+    build_cutout_sigs_time = time.time()
+
     # Use chord to run all cutout tasks in parallel, then call write_results with their results
     write_results_sig = write_results.s(job_id=job_id)
     write_results_sig.set(task_id=f"write_results-{job_id}-{batch_num}")
     chord(cutout_sigs)(write_results_sig)
 
+    chord_time = time.time()
+    timings = {
+        "batch_num_time": batch_num_time - start_time,
+        "pop_pending_tasks_time": pop_pending_tasks_time - batch_num_time,
+        "increment_queued_task_count_time": increment_queued_task_count_time - pop_pending_tasks_time,
+        "build_cutout_sigs_time": build_cutout_sigs_time - increment_queued_task_count_time,
+        "chord_time": chord_time - build_cutout_sigs_time,
+        "batch_cutouts_total_time": chord_time - start_time,
+    }
+    logger.info(timings)
 
 @celery_app.task(bind=True)
 def write_results(self: Task, results: list[CutoutResponse | dict | None], job_id: str):
@@ -138,6 +179,7 @@ def write_results(self: Task, results: list[CutoutResponse | dict | None], job_i
         results: List of CutoutResponse objects (or dicts/None for failed tasks) from the chord
         job_id: The job ID to write results for
     """
+    start_time = time.time()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
     # Filter out None/failed results and validate
@@ -151,12 +193,14 @@ def write_results(self: Task, results: list[CutoutResponse | dict | None], job_i
             cutout_results.append(rp)
         else:
             continue
+    filter_results_time = time.time()
 
     # Write results to Parquet storage if we have any
     if cutout_results:
         results_writer = CutoutResults(job_id)
         batch_num = r.get_batch_num()
         results_writer.add_results(results=cutout_results, batch_num=batch_num)
+    write_results_time = time.time()
 
     # Check if job is complete and update job phase
     job_status = r.get_job_result_status()
@@ -175,6 +219,15 @@ def write_results(self: Task, results: list[CutoutResponse | dict | None], job_i
         batch_cutouts_task = batch_cutouts.s(job_id=job_id)
         batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-{next_batch}")
         batch_cutouts_task.delay()
+
+    update_job_time = time.time()
+    timings = {
+        "filter_results_time": filter_results_time - start_time,
+        "write_results_time": write_results_time - filter_results_time,
+        "update_job_time": update_job_time - write_results_time,
+        "write_results_total_time": update_job_time - start_time,
+    }
+    logger.info(timings)
 
 
 def get_fits_filter(fits_cutout: HDUList) -> str | None:
@@ -212,8 +265,6 @@ def generate_cutout(
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to {}.
     """
-    print(f"[generate_cutout] mode: {mode}")
-
     start_time = time.time()
 
     if isinstance(size, int):
@@ -322,7 +373,7 @@ def generate_cutout(
         f"{mode}_start_time": cutout_start_time - init_time,
         "cutout_time": cutout_time - cutout_start_time,
         "write_time": write_time - cutout_time,
-        "total_time": end_time - start_time
+        "generate_cutout_total_time": end_time - start_time
     }
     logger.info(timings)
 
@@ -472,7 +523,7 @@ def execute_cutout(
         "start_status_update_time": status_update_time - redis_factory_time,
         "cutout_time": cutout_time - status_update_time,
         "end_status_update_time": end_status_update_time - cutout_time,
-        "total_time": end_status_update_time - start_time
+        "execute_cutout_total_time": end_status_update_time - start_time
     }
     logger.info(timings)
     return resp
