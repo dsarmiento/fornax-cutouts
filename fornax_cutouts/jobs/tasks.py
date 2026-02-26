@@ -21,7 +21,7 @@ from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 
-@celery_app.task(bind=True, ignore_result=True)
+@celery_app.task(bind=True, ignore_result=True, soft_time_limit=30*60, time_limit=35*60)
 def schedule_job(
     self: Task,
     job_id: str,
