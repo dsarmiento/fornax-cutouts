@@ -1,3 +1,4 @@
+import gc
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -84,6 +85,8 @@ def schedule_job(
         r.set_start_time()
         r.set_end_time()
         r.update_job_phase(ExecutionPhase.COMPLETED)
+        del target_fnames, descriptors, resolved_position, validated_params, valid_mission_params
+        gc.collect()
         return
 
     r.push_pending_tasks(descriptors)
@@ -111,6 +114,10 @@ def schedule_job(
         "schedule_job_total_time": batch_cutouts_task_time - start_time,
     }
     logger.info(timings)
+
+    # Explicit cleanup to reduce memory before worker picks up next task
+    del target_fnames, descriptors, resolved_position, validated_params, valid_mission_params
+    gc.collect()
 
 @celery_app.task(bind=True, ignore_result=True)
 def batch_cutouts(self: Task, job_id: str):
@@ -352,14 +359,16 @@ def generate_cutout(
     }
     logger.info(timings)
 
+    filter_val = metadata.get("filter") or get_fits_filter(cutout.fits_cutouts[0])
+    mission_extras = {k: v for k, v in metadata.items() if k != "filter"}
     return CutoutResponse(
         mission=mission,
         position=target,
         size_px=size,
-        filter=metadata.pop("filter") or get_fits_filter(cutout.fits_cutouts[0]),
+        filter=filter_val,
         fits=fits_fname,
         preview=img_fname,
-        mission_extras=metadata,
+        mission_extras=mission_extras,
     )
 
 def generate_color_preview(
