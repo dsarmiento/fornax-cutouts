@@ -119,7 +119,7 @@ def schedule_job(
     del target_fnames, descriptors, resolved_position, validated_params, valid_mission_params
     gc.collect()
 
-@celery_app.task(bind=True, ignore_result=True)
+@celery_app.task(bind=True, ignore_result=True, soft_time_limit=30*60, time_limit=35*60)
 def batch_cutouts(self: Task, job_id: str):
     """
     Chunked batcher: pops descriptors from Redis in batches and creates generate_cutout tasks
