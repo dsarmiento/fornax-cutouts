@@ -89,7 +89,7 @@ def _monkey_patch_astrocut():
         _orig_load = fits_cutout.FITSCutout._load_file_data
 
         def _patched_load(self, input_file):
-            fsspec_kwargs = {"anon": True, "default_block_size": block_size_bytes, "default_fill_cache": False} if "s3://" in str(input_file) else None
+            fsspec_kwargs = {"anon": True, "default_block_size": block_size_bytes} if "s3://" in str(input_file) else None
             hdulist = fits.open(input_file, mode="denywrite", memmap=True, fsspec_kwargs=fsspec_kwargs)
             infile_exts = np.where([hdu.is_image and hdu.size > 0 for hdu in hdulist])[0]
             cutout_inds = self._parse_extensions(input_file, infile_exts)
