@@ -62,8 +62,8 @@ def setup_worker_process(**kwargs):
     redis_client_factory()
     logger.info("Redis client setup complete")
 
-    # _monkey_patch_astrocut()
-    # logger.info("Astrocut monkey patch complete")
+    _monkey_patch_astrocut()
+    logger.info("Astrocut monkey patch complete")
 
 
 @worker_process_shutdown.connect
