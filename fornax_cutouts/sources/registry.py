@@ -76,22 +76,13 @@ class CutoutRegistry:
     ) -> list[FilenameLookupResponse]:
         ret = []
 
-        # TODO: This can be parallelized with async or something, not needed currently with only ps1
-        for target in position:
-            for mission, params in mission_params.items():
-                filenames = self.get_mission(mission).get_filenames(
-                    position=target,
-                    include_metadata=include_metadata,
-                    **params,
-                )
+        for mission, params in mission_params.items():
+            filenames = self.get_mission(mission).get_filenames(
+                position=position,
+                include_metadata=include_metadata,
+                **params,
+            )
 
-                ret.append(
-                    FilenameLookupResponse(
-                        mission=mission,
-                        target=target,
-                        filenames=filenames,
-                        size=params["size"] if "size" in params else size,
-                    )
-                )
+            ret.extend(filenames)
 
         return ret
