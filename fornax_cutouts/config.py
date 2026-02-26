@@ -26,8 +26,10 @@ class RedisConfig(BaseModel):
 
 
 class WorkerConfig(BaseModel):
-    redis_prefix: str = "cutouts"
+    redis_prefix: str = "fornax-cutouts"
     batch_size: int = 5
+    prefetch_multiplier: int = 1
+    max_tasks_per_child: int = 50
 
 class StorageConfig(BaseModel):
     prefix: str = "/tmp"

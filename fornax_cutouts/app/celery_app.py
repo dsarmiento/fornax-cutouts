@@ -40,9 +40,9 @@ conf_update = {
     },
     "result_expires": 1 * 60 * 60,  # 1 Hour,
     # Worker memory management
-    "worker_prefetch_multiplier": 1,  # Only prefetch 1 task at a time to prevent memory buildup
-    "task_acks_late": True,  # Acknowledge tasks after completion, not before
-    "worker_max_tasks_per_child": 50,  # Restart worker after N tasks to prevent memory leaks
+    "task_acks_late": True,
+    "worker_prefetch_multiplier": CONFIG.worker.prefetch_multiplier,
+    "worker_max_tasks_per_child": CONFIG.worker.max_tasks_per_child,
 }
 
 if CONFIG.redis.use_ssl:
