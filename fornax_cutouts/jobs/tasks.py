@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 import astrocut
 from astrocut.exceptions import InvalidQueryError
+from astropy.coordinates import SkyCoord
 from astropy.io.fits.hdu.hdulist import HDUList
 from celery import Task, chord
 from fsspec import AbstractFileSystem, filesystem
@@ -30,14 +31,14 @@ def schedule_job(
     output_format: list[str],
     mode: str = "fits_cut",
 ):
-    start_time = time.time()
+    start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
     r.update_job_phase(ExecutionPhase.QUEUED)
-    redis_update_time = time.time()
+    redis_update_time = time.perf_counter()
 
     resolved_position = resolve_positions(position)
-    resolve_positions_time = time.time()
+    resolve_positions_time = time.perf_counter()
 
     validated_params = cutout_registry.validate_mission_params(mission_params=mission_params, size=size)
 
@@ -48,7 +49,7 @@ def schedule_job(
             logger.error(f"{mission!r} params are not valid, please recheck and resubmit.")
         else:
             valid_mission_params[mission] = mission_params[mission]
-    validate_mission_params_time = time.time()
+    validate_mission_params_time = time.perf_counter()
 
 
     target_fnames = cutout_registry.get_target_filenames(
@@ -57,7 +58,7 @@ def schedule_job(
         size=size,
         include_metadata=True,
     )
-    get_target_filenames_time = time.time()
+    get_target_filenames_time = time.perf_counter()
 
     descriptors = []
     for target_fname in target_fnames:
@@ -77,7 +78,7 @@ def schedule_job(
             descriptors.append(descriptor)
 
     total_jobs = len(descriptors)
-    generate_descriptors_time = time.time()
+    generate_descriptors_time = time.perf_counter()
 
     if total_jobs == 0:
         r.set_start_time()
@@ -86,17 +87,17 @@ def schedule_job(
         return
 
     r.push_pending_tasks(descriptors)
-    push_pending_tasks_time = time.time()
+    push_pending_tasks_time = time.perf_counter()
     r.set_total_task_count(total_jobs)
     r.update_job_phase(ExecutionPhase.EXECUTING)
     r.set_start_time()
-    metadata_update_time = time.time()
+    metadata_update_time = time.perf_counter()
 
     batch_cutouts_task = batch_cutouts.s(job_id=job_id)
     batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-0")
     batch_cutouts_task.delay()
 
-    batch_cutouts_task_time = time.time()
+    batch_cutouts_task_time = time.perf_counter()
 
     timings = {
         "schedule_job_update_time": redis_update_time - start_time,
@@ -117,19 +118,19 @@ def batch_cutouts(self: Task, job_id: str):
     Chunked batcher: pops descriptors from Redis in batches and creates generate_cutout tasks
     using a Celery chord. The chord callback (write_results) handles completion and looping back.
     """
-    start_time = time.time()
+    start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
     batch_num = r.increment_batch_num()
-    batch_num_time = time.time()
+    batch_num_time = time.perf_counter()
 
     descriptors = r.pop_pending_tasks(CONFIG.worker.batch_size)
-    pop_pending_tasks_time = time.time()
+    pop_pending_tasks_time = time.perf_counter()
 
     if not descriptors:
         return
     r.increment_queued_task_count(len(descriptors))
-    increment_queued_task_count_time = time.time()
+    increment_queued_task_count_time = time.perf_counter()
 
     # Build signatures for all cutout tasks in this batch
     cutout_sigs = []
@@ -151,14 +152,14 @@ def batch_cutouts(self: Task, job_id: str):
         sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}")
         cutout_sigs.append(sig)
 
-    build_cutout_sigs_time = time.time()
+    build_cutout_sigs_time = time.perf_counter()
 
     # Use chord to run all cutout tasks in parallel, then call write_results with their results
     write_results_sig = write_results.s(job_id=job_id)
     write_results_sig.set(task_id=f"write_results-{job_id}-{batch_num}")
     chord(cutout_sigs)(write_results_sig)
 
-    chord_time = time.time()
+    chord_time = time.perf_counter()
     timings = {
         "batch_num_time": batch_num_time - start_time,
         "pop_pending_tasks_time": pop_pending_tasks_time - batch_num_time,
@@ -179,7 +180,7 @@ def write_results(self: Task, results: list[CutoutResponse | dict | None], job_i
         results: List of CutoutResponse objects (or dicts/None for failed tasks) from the chord
         job_id: The job ID to write results for
     """
-    start_time = time.time()
+    start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
     # Filter out None/failed results and validate
@@ -193,14 +194,14 @@ def write_results(self: Task, results: list[CutoutResponse | dict | None], job_i
             cutout_results.append(rp)
         else:
             continue
-    filter_results_time = time.time()
+    filter_results_time = time.perf_counter()
 
     # Write results to Parquet storage if we have any
     if cutout_results:
         results_writer = CutoutResults(job_id)
         batch_num = r.get_batch_num()
         results_writer.add_results(results=cutout_results, batch_num=batch_num)
-    write_results_time = time.time()
+    write_results_time = time.perf_counter()
 
     # Check if job is complete and update job phase
     job_status = r.get_job_result_status()
@@ -220,7 +221,7 @@ def write_results(self: Task, results: list[CutoutResponse | dict | None], job_i
         batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-{next_batch}")
         batch_cutouts_task.delay()
 
-    update_job_time = time.time()
+    update_job_time = time.perf_counter()
     timings = {
         "filter_results_time": filter_results_time - start_time,
         "write_results_time": write_results_time - filter_results_time,
@@ -265,7 +266,7 @@ def generate_cutout(
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to {}.
     """
-    start_time = time.time()
+    start_time = time.perf_counter()
 
     if isinstance(size, int):
         size = (size, size)
@@ -285,14 +286,14 @@ def generate_cutout(
     if not output_is_s3 and not fs.isdir(output_dir):
         fs.mkdir(output_dir)
 
-    init_time = time.time()
+    init_time = time.perf_counter()
 
     fits_fname = ""
     img_fname = ""
 
     if mode == "in_memory":
         if "fits" in output_format:
-            cutout_start_time = time.time()
+            cutout_start_time = time.perf_counter()
             cutout = astrocut.fits_cut(
                 source_file,
                 f"{target[0]} {target[1]}",
@@ -300,61 +301,35 @@ def generate_cutout(
                 memory_only=True,
             )[0]
 
-            cutout_time = time.time()
+            cutout_time = time.perf_counter()
             fits_fname = f"{output_dir}/{cutout_prefix}.fits"
 
             with fs.open(fits_fname, "wb") as f:
                 cutout.writeto(f)
-            write_time = time.time()
+            write_time = time.perf_counter()
     else:
         with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
-            if mode == "FITSCutout":
-                cutout_start_time = time.time()
-                cutout = astrocut.FITSCutout(
-                    input_files=source_file,
-                    coordinates=f"{target[0]} {target[1]}",
-                    cutout_size=size,
-                    single_outfile=False,
-                )
+            cutout_start_time = time.perf_counter()
+            cutout = astrocut.FITSCutout(
+                input_files=source_file,
+                coordinates=SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs"),
+                cutout_size=size,
+                single_outfile=False,
+            )
 
-                if "fits" in output_format:
-                    fits_fname = cutout.write_as_fits(
-                        output_dir=temp_output_dir,
-                        cutout_prefix=cutout_prefix,
-                    )[0]
+            if "fits" in output_format:
+                fits_fname = cutout.write_as_fits(
+                    output_dir=temp_output_dir,
+                    cutout_prefix=cutout_prefix,
+                )[0]
 
-                if "jpg" in output_format or "jpeg" in output_format:
-                    img_fname = cutout.write_as_img(
-                        output_dir=temp_output_dir,
-                        cutout_prefix=cutout_prefix,
-                    )[0]
+            if "jpg" in output_format or "jpeg" in output_format:
+                img_fname = cutout.write_as_img(
+                    output_dir=temp_output_dir,
+                    cutout_prefix=cutout_prefix,
+                )[0]
 
-                cutout_time = time.time()
-
-            elif mode == "fits_cut":
-                cutout_start_time = time.time()
-
-                if "fits" in output_format:
-                    fits_fname = astrocut.fits_cut(
-                        source_file,
-                        f"{target[0]} {target[1]}",
-                        size,
-                        output_dir=temp_output_dir,
-                        cutout_prefix=cutout_prefix,
-                        single_outfile=True,
-                    )
-
-                if "jpg" in output_format or "jpeg" in output_format:
-                    img_fname = astrocut.img_cut(
-                        source_file,
-                        f"{target[0]} {target[1]}",
-                        size,
-                        output_dir=temp_output_dir,
-                        cutout_prefix=cutout_prefix,
-                        single_outfile=True,
-                    )
-
-                cutout_time = time.time()
+            cutout_time = time.perf_counter()
 
             if fits_fname:
                 fs.put(lpath=fits_fname, rpath=output_dir)
@@ -364,9 +339,9 @@ def generate_cutout(
                 fs.put(lpath=img_fname, rpath=output_dir)
                 img_fname = img_fname.replace(temp_output_dir, output_dir)
 
-            write_time = time.time()
+            write_time = time.perf_counter()
 
-    end_time = time.time()
+    end_time = time.perf_counter()
 
     timings = {
         "init_time": init_time - start_time,
@@ -406,7 +381,7 @@ def generate_color_preview(
 
     cutout = astrocut.FITSCutout(
         input_files=[red, green, blue],
-        coordinates=f"{target[0]} {target[1]}",
+        coordinates=SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs"),
         cutout_size=size,
         single_outfile=False,
     )
@@ -476,13 +451,13 @@ def execute_cutout(
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to None.
     """
-    start_time = time.time()
+    start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
-    redis_factory_time = time.time()
+    redis_factory_time = time.perf_counter()
 
     r.decrement_queued_task_count()
     r.increment_executing_task_count()
-    status_update_time = time.time()
+    status_update_time = time.perf_counter()
     try:
         resp = generate_cutout(
             source_file=source_file,
@@ -494,7 +469,7 @@ def execute_cutout(
             metadata=metadata,
             mode=mode,
         )
-        cutout_time = time.time()
+        cutout_time = time.perf_counter()
     except Exception as e:
         r.decrement_executing_task_count()
         r.push_failed_task(
@@ -516,7 +491,7 @@ def execute_cutout(
 
     r.decrement_executing_task_count()
     r.increment_completed_task_count()
-    end_status_update_time = time.time()
+    end_status_update_time = time.perf_counter()
 
     timings = {
         "redis_factory_time": redis_factory_time - start_time,

@@ -1,4 +1,5 @@
 import logging
+import os
 import ssl
 
 from celery import Celery
@@ -61,8 +62,39 @@ def setup_worker_process(**kwargs):
     redis_client_factory()
     logger.info("Redis client setup complete")
 
+    # _monkey_patch_astrocut()
+    # logger.info("Astrocut monkey patch complete")
+
 
 @worker_process_shutdown.connect
 def teardown_worker_process(**kwargs):
     redis_client_factory().close()
     logger.info("Redis client teardown complete")
+
+
+def _monkey_patch_astrocut():
+    """
+    If block_size_mib is set, monkeypatch astrocut to pass block_size in fsspec_kwargs.
+    """
+    block_size_mib = os.environ.get("S3FS_BLOCK_SIZE", "0.5")
+    block_size_mib = float(block_size_mib) if block_size_mib is not None else block_size_mib
+    if block_size_mib is None or block_size_mib <= 0:
+        return
+    block_size_bytes = int(block_size_mib * 1024 * 1024)
+    try:
+        import astrocut.fits_cutout as fits_cutout
+        import numpy as np
+        from astropy.io import fits
+
+        _orig_load = fits_cutout.FITSCutout._load_file_data
+
+        def _patched_load(self, input_file):
+            fsspec_kwargs = {"anon": True, "default_block_size": block_size_bytes} if "s3://" in str(input_file) else None
+            hdulist = fits.open(input_file, mode="denywrite", memmap=True, fsspec_kwargs=fsspec_kwargs)
+            infile_exts = np.where([hdu.is_image and hdu.size > 0 for hdu in hdulist])[0]
+            cutout_inds = self._parse_extensions(input_file, infile_exts)
+            return (hdulist, cutout_inds)
+
+        fits_cutout.FITSCutout._load_file_data = _patched_load  # type: ignore[method-assign]
+    except Exception as e:
+        logger.warning("Could not apply s3fs block_size override: %s", e)
