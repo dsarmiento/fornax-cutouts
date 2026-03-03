@@ -22,7 +22,7 @@ from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 
-@celery_app.task(bind=True, ignore_result=True, soft_time_limit=30*60, time_limit=35*60)
+@celery_app.task(bind=True, ignore_result=True, soft_time_limit=30*60, time_limit=35*60, queue="high_mem")
 def schedule_job(
     self: Task,
     job_id: str,
@@ -119,7 +119,7 @@ def schedule_job(
     del target_fnames, descriptors, resolved_position, validated_params, valid_mission_params
     gc.collect()
 
-@celery_app.task(bind=True, ignore_result=True, soft_time_limit=30*60, time_limit=35*60)
+@celery_app.task(bind=True, ignore_result=True, soft_time_limit=30*60, time_limit=35*60, queue="high_mem")
 def batch_cutouts(self: Task, job_id: str):
     """
     Chunked batcher: pops descriptors from Redis in batches and creates generate_cutout tasks
@@ -177,7 +177,7 @@ def batch_cutouts(self: Task, job_id: str):
     }
     logger.info(timings)
 
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, queue="high_mem")
 def write_results(self: Task, results: list[CutoutResponse | dict | None], job_id: str):
     """
     Chord callback: receives results from a batch of generate_cutout tasks and writes them to AsyncCutoutResults.
@@ -431,7 +431,7 @@ def generate_color_preview(
     )
 
 
-@celery_app.task(bind=True, pydantic=True)
+@celery_app.task(bind=True, pydantic=True, queue="cutouts")
 def execute_cutout(
     self: Task,
     job_id: str,

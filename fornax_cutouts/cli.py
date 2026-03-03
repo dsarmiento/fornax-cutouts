@@ -96,6 +96,13 @@ def api(
     help="Number of concurrent worker processes/threads.",
 )
 @click.option(
+    "-Q",
+    "--queues",
+    type=click.STRING,
+    default="cutouts,high_mem",
+    help="Comma-separated list of queues to consume from (e.g. 'cutouts,high_mem'). Defaults to 'cutouts,high_mem'.",
+)
+@click.option(
     "--log-level",
     type=click.Choice(["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"], case_sensitive=False),
     default=_CELERY_LOG_LEVEL_DEFAULT,
@@ -106,6 +113,7 @@ def worker(
     name: str | None,
     autoscale: str | None,
     concurrency: int | None,
+    queues: str | None,
     log_level: str,
 ):
     """Start Celery worker."""
@@ -122,6 +130,9 @@ def worker(
 
     if name:
         args.append(f"--hostname={name}")
+
+    if queues:
+        args.append(f"--queues={queues}")
 
     celery_app.worker_main(args)
 
