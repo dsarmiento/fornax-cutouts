@@ -5,14 +5,13 @@ from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
 import astrocut
-from astrocut.exceptions import InvalidQueryError
 from astropy.coordinates import SkyCoord
 from astropy.io.fits.hdu.hdulist import HDUList
 from celery import Task, chord
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
-from fornax_cutouts.app.celery_app import celery_app, logger, redis_client_factory
+from fornax_cutouts.app.celery_app import celery_app, get_pool_size_for_queue, logger, redis_client_factory
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import SyncRedisCutoutJob
 from fornax_cutouts.jobs.results import CutoutResults
@@ -26,23 +25,27 @@ from fornax_cutouts.utils.santa_resolver import resolve_positions
 def schedule_job(
     self: Task,
     job_id: str,
-    position: list[str],
-    size: int,
-    mission_params: dict[str, dict],
-    output_format: list[str],
-    mode: str = "fits_cut",
 ):
     start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
+    job_parameters = r.get_job_parameters()
+
+    logger.info(job_parameters)
+    size = job_parameters.pop("size")
+    output_format = job_parameters.pop("output_format")
+
+    source_names = cutout_registry.get_source_names()
+    mission_params = {
+        mission: params
+        for mission, params in job_parameters.items()
+        if mission in source_names
+    }
+
     r.update_job_phase(ExecutionPhase.QUEUED)
     redis_update_time = time.perf_counter()
 
-    resolved_position = resolve_positions(position)
-    resolve_positions_time = time.perf_counter()
-
     validated_params = cutout_registry.validate_mission_params(mission_params=mission_params, size=size)
-
 
     valid_mission_params: dict[str, dict] = {}
     for mission, is_valid in validated_params.items():
@@ -52,44 +55,47 @@ def schedule_job(
             valid_mission_params[mission] = mission_params[mission]
     validate_mission_params_time = time.perf_counter()
 
+    total_jobs = 0
+    for positions in r.scan_job_positions():
+        resolved_positions = resolve_positions(positions)
 
-    target_fnames = cutout_registry.get_target_filenames(
-        position=resolved_position,
-        mission_params=valid_mission_params,
-        size=size,
-        include_metadata=True,
-    )
-    get_target_filenames_time = time.perf_counter()
+        target_fnames = cutout_registry.get_target_filenames(
+            position=resolved_positions,
+            mission_params=valid_mission_params,
+            size=size,
+            include_metadata=True,
+        )
 
-    descriptors = []
-    for target_fname in target_fnames:
-        for filename_obj in target_fname.filenames:
-            descriptor = {
-                "job_id": job_id,
-                "source_file": filename_obj.filename,
-                "target": [target_fname.target.ra, target_fname.target.dec],  # Convert NamedTuple to list for JSON
-                "size": target_fname.size or size,
-                "output_format": output_format,
-                "output_dir": f"{CONFIG.storage.prefix}/cutouts/async/{job_id}/{target_fname.mission}",
-                "ttl": CONFIG.async_ttl,
-                "mission": target_fname.mission,
-                "metadata": filename_obj.metadata,
-                "mode": mode,
-            }
-            descriptors.append(descriptor)
+        descriptors = []
+        for target_fname in target_fnames:
+            for filename_obj in target_fname.filenames:
+                descriptor = {
+                    "job_id": job_id,
+                    "source_file": filename_obj.filename,
+                    "target": [target_fname.target.ra, target_fname.target.dec],  # Convert NamedTuple to list for JSON
+                    "size": target_fname.size or size,
+                    "output_format": output_format,
+                    "output_dir": f"{CONFIG.storage.prefix}/cutouts/async/{job_id}/{target_fname.mission}",
+                    "ttl": CONFIG.async_ttl,
+                    "mission": target_fname.mission,
+                    "metadata": filename_obj.metadata,
+                }
+                descriptors.append(descriptor)
 
-    total_jobs = len(descriptors)
-    generate_descriptors_time = time.perf_counter()
+        num_jobs = len(descriptors)
 
-    if total_jobs == 0:
-        r.set_start_time()
-        r.set_end_time()
-        r.update_job_phase(ExecutionPhase.COMPLETED)
-        del target_fnames, descriptors, resolved_position, validated_params, valid_mission_params
-        gc.collect()
-        return
+        if num_jobs == 0:
+            r.set_start_time()
+            r.set_end_time()
+            r.update_job_phase(ExecutionPhase.COMPLETED)
+            del target_fnames, descriptors, resolved_positions
+            gc.collect()
+            return
 
-    r.push_pending_tasks(descriptors)
+        r.push_pending_tasks(descriptors)
+        total_jobs += num_jobs
+        del target_fnames, descriptors, resolved_positions
+
     push_pending_tasks_time = time.perf_counter()
     r.set_total_task_count(total_jobs)
     r.update_job_phase(ExecutionPhase.EXECUTING)
@@ -104,20 +110,13 @@ def schedule_job(
 
     timings = {
         "schedule_job_update_time": redis_update_time - start_time,
-        "resolve_positions_time": resolve_positions_time - redis_update_time,
-        "validate_mission_params_time": validate_mission_params_time - resolve_positions_time,
-        "get_target_filenames_time": get_target_filenames_time - validate_mission_params_time,
-        "generate_descriptors_time": generate_descriptors_time - get_target_filenames_time,
-        "push_pending_tasks_time": push_pending_tasks_time - generate_descriptors_time,
+        "validate_mission_params_time": validate_mission_params_time - redis_update_time,
+        "push_pending_tasks_time": push_pending_tasks_time - validate_mission_params_time,
         "metadata_update_time": metadata_update_time - push_pending_tasks_time,
         "batch_cutouts_task_time": batch_cutouts_task_time - metadata_update_time,
-        "schedule_job_total_time": batch_cutouts_task_time - start_time,
+        "schedule_job_total_time": batch_cutouts_task_time - start_time
     }
     logger.info(timings)
-
-    # Explicit cleanup to reduce memory before worker picks up next task
-    del target_fnames, descriptors, resolved_position, validated_params, valid_mission_params
-    gc.collect()
 
 @celery_app.task(bind=True, ignore_result=True, soft_time_limit=30*60, time_limit=35*60, queue="high_mem")
 def batch_cutouts(self: Task, job_id: str):
@@ -131,7 +130,11 @@ def batch_cutouts(self: Task, job_id: str):
     batch_num = r.increment_batch_num()
     batch_num_time = time.perf_counter()
 
-    descriptors = r.pop_pending_tasks(CONFIG.worker.batch_size)
+    pool_size = get_pool_size_for_queue("cutouts")
+    batch_size = pool_size * CONFIG.worker.batch_size_per_worker
+    logger.info({"batch_number": batch_num, "pool_size": pool_size, "batch_size": batch_size})
+
+    descriptors = r.pop_pending_tasks(batch_size)
     pop_pending_tasks_time = time.perf_counter()
 
     if not descriptors:
@@ -154,7 +157,6 @@ def batch_cutouts(self: Task, job_id: str):
             output_dir=desc["output_dir"],
             mission=desc["mission"],
             metadata=desc.get("metadata"),
-            mode=desc.get("mode"),
         )
         sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}")
         cutout_sigs.append(sig)
@@ -257,7 +259,6 @@ def generate_cutout(
     output_dir: str,
     mission: str = "sync_cutout",
     metadata: dict = {},
-    mode: str = "fits_cut",
 ) -> CutoutResponse:
     """
     Execute a cutout within the specific source file
@@ -298,61 +299,44 @@ def generate_cutout(
     fits_fname = ""
     img_fname = ""
 
-    if mode == "in_memory":
+    with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
+        cutout_start_time = time.perf_counter()
+        cutout = astrocut.FITSCutout(
+            input_files=source_file,
+            coordinates=SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs"),
+            cutout_size=size,
+            single_outfile=False,
+        )
+
         if "fits" in output_format:
-            cutout_start_time = time.perf_counter()
-            cutout = astrocut.fits_cut(
-                source_file,
-                f"{target[0]} {target[1]}",
-                size,
-                memory_only=True,
+            fits_fname = cutout.write_as_fits(
+                output_dir=temp_output_dir,
+                cutout_prefix=cutout_prefix,
             )[0]
 
-            cutout_time = time.perf_counter()
-            fits_fname = f"{output_dir}/{cutout_prefix}.fits"
+        if "jpg" in output_format or "jpeg" in output_format:
+            img_fname = cutout.write_as_img(
+                output_dir=temp_output_dir,
+                cutout_prefix=cutout_prefix,
+            )[0]
 
-            with fs.open(fits_fname, "wb") as f:
-                cutout.writeto(f)
-            write_time = time.perf_counter()
-    else:
-        with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
-            cutout_start_time = time.perf_counter()
-            cutout = astrocut.FITSCutout(
-                input_files=source_file,
-                coordinates=SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs"),
-                cutout_size=size,
-                single_outfile=False,
-            )
+        cutout_time = time.perf_counter()
 
-            if "fits" in output_format:
-                fits_fname = cutout.write_as_fits(
-                    output_dir=temp_output_dir,
-                    cutout_prefix=cutout_prefix,
-                )[0]
+        if fits_fname:
+            fs.put(lpath=fits_fname, rpath=output_dir)
+            fits_fname = fits_fname.replace(temp_output_dir, output_dir)
 
-            if "jpg" in output_format or "jpeg" in output_format:
-                img_fname = cutout.write_as_img(
-                    output_dir=temp_output_dir,
-                    cutout_prefix=cutout_prefix,
-                )[0]
+        if img_fname:
+            fs.put(lpath=img_fname, rpath=output_dir)
+            img_fname = img_fname.replace(temp_output_dir, output_dir)
 
-            cutout_time = time.perf_counter()
-
-            if fits_fname:
-                fs.put(lpath=fits_fname, rpath=output_dir)
-                fits_fname = fits_fname.replace(temp_output_dir, output_dir)
-
-            if img_fname:
-                fs.put(lpath=img_fname, rpath=output_dir)
-                img_fname = img_fname.replace(temp_output_dir, output_dir)
-
-            write_time = time.perf_counter()
+        write_time = time.perf_counter()
 
     end_time = time.perf_counter()
 
     timings = {
         "init_time": init_time - start_time,
-        f"{mode}_start_time": cutout_start_time - init_time,
+        "start_time": cutout_start_time - init_time,
         "cutout_time": cutout_time - cutout_start_time,
         "write_time": write_time - cutout_time,
         "generate_cutout_total_time": end_time - start_time
@@ -442,7 +426,6 @@ def execute_cutout(
     output_dir: str = "",
     mission: str = "",
     metadata: dict = {},
-    mode: str = "fits_cut",
 ) -> CutoutResponse:
     """
     Generate a cutout within the specific source file
@@ -476,7 +459,6 @@ def execute_cutout(
             output_dir=output_dir,
             mission=mission,
             metadata=metadata,
-            mode=mode,
         )
         cutout_time = time.perf_counter()
     except Exception as e:
@@ -491,7 +473,6 @@ def execute_cutout(
                 "output_dir": output_dir,
                 "mission": mission,
                 "metadata": metadata,
-                "mode": mode,
             },
             error_message=str(e),
         )

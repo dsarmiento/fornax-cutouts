@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Generator
 
 from redis import Redis as SyncRedisClient
 from redis import RedisCluster as SyncRedisCluster
@@ -18,10 +18,12 @@ from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, Parameters, S
 
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.uws import create_job_summary, create_parameters
+from fornax_cutouts.utils.pagination import get_pagination_metadata
 
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
 CUTOUT_INDEX_NAME = "cutoutJobsIdx"
 CUTOUT_JOB_PREFIX = f"{CONFIG.worker.redis_prefix}:jobs"
+POSITIONS_BATCH_SIZE = 10000
 
 
 @dataclass
@@ -31,6 +33,10 @@ class RedisKeys:
     @property
     def uws(self):
         return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:uws"
+
+    @property
+    def positions(self):
+        return f"{self.uws}:positions"
 
     @property
     def pending_tasks(self):
@@ -146,7 +152,7 @@ async def async_get_uws_jobs(
     else:
         keys = []
         async for key in redis_client.scan_iter(match=f"{CUTOUT_JOB_PREFIX}:*:uws", count=100):
-            keys.append(key.decode())
+            keys.append(key)
 
         if keys:
             for i in range(0, len(keys), 100):
@@ -205,14 +211,24 @@ class AsyncRedisCutoutJob:
             "job_id": self.job_id,
             "phase": ExecutionPhase.PENDING,
         }
+        positions_obj = []
 
         if run_id:
             job_obj["run_id"] = run_id
 
         if parameters:
+            positions_obj = parameters.pop("position", [])
+            parameters["position_count"] = len(positions_obj)
             job_obj["parameters"] = parameters
 
         await self.__update_uws(path="$", obj=job_obj)
+
+        async with self.__redis_client.pipeline() as pipe:
+            for idx in range(0, len(positions_obj), POSITIONS_BATCH_SIZE):
+                batch_positions = positions_obj[idx : idx + POSITIONS_BATCH_SIZE]
+                pipe.rpush(self.__keys.positions, *batch_positions)
+            await pipe.execute()
+
         await self.__set_create_time()
 
         async with self.__redis_client.pipeline() as pipe:
@@ -223,9 +239,11 @@ class AsyncRedisCutoutJob:
             pipe.set(self.__keys.current_batch_num, 0)
             await pipe.execute()
 
-    async def get_job_summary(self) -> JobSummary:
+    async def get_job_summary(self, base_url: str = "") -> JobSummary:
         job_json: dict = await self.__redis_client.json().get(self.__keys.uws)
         job_json.pop("results", None)
+        if base_url:
+            job_json["parameters"]["position"] = f"{base_url}/parameters/position"
         return create_job_summary(**job_json)
 
     async def get_job_result_status(self):
@@ -255,24 +273,21 @@ class AsyncRedisCutoutJob:
             "total_jobs": total_tasks,
         }
 
-    async def get_job_parameters(self) -> Parameters:
+    async def get_job_parameters(self, position_base_url: str) -> Parameters:
         job_parameters = await self.__redis_client.json().get(
             self.__keys.uws,
             "$.parameters",
         )
+        job_parameters[0]["position"] = f"{position_base_url}"
         return create_parameters(**job_parameters[0])
 
-
-# get_and_increment_batch_num
-# get_job_cutout_results
-# get_expected_results
-# get_completed_count
-# get_task_failures
-# get_pending_count
-# get_batch_num
-# increment_task_failures
-# increment_completed
-
+    async def get_job_positions(self, page: int = 0, limit: int = 100, base_url: str = "") -> dict:
+        start = page * limit
+        end = (page + 1) * limit - 1
+        positions = await self.__redis_client.lrange(self.__keys.positions, start, end)
+        metadata = get_pagination_metadata(page, limit, len(positions), base_url)
+        metadata["positions"] = positions
+        return metadata
 
 class SyncRedisCutoutJob:
     def __init__(self, redis_client: SyncRedisClient | SyncRedisCluster, job_id: str):
@@ -300,6 +315,22 @@ class SyncRedisCutoutJob:
             time = datetime.now()
 
         self.__update_uws(path=f"$.{time_field}", obj=time.timestamp())
+
+    def get_job_parameters(self) -> dict:
+        job_parameters = self.__redis_client.json().get(self.__keys.uws, "$.parameters")
+        return job_parameters[0]
+
+    def scan_job_positions(self) -> Generator[list[str], None, None]:
+        start = 0
+        while True:
+            end = start + POSITIONS_BATCH_SIZE - 1
+            batch = self.__redis_client.lrange(self.__keys.positions, start, end)
+            if not batch:
+                break
+            yield batch
+            if len(batch) < POSITIONS_BATCH_SIZE:
+                break
+            start += POSITIONS_BATCH_SIZE
 
     def update_job_phase(self, new_phase: ExecutionPhase):
         self.__update_uws(

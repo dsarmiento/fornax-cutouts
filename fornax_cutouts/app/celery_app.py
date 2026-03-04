@@ -98,3 +98,21 @@ def _monkey_patch_astrocut():
         fits_cutout.FITSCutout._load_file_data = _patched_load  # type: ignore[method-assign]
     except Exception as e:
         logger.warning("Could not apply s3fs block_size override: %s", e)
+
+
+def get_pool_size_for_queue(queue_name: str) -> int:
+    inspector = celery_app.control.inspect()
+    active_queues = inspector.active_queues()
+    stats = inspector.stats()
+
+    if not active_queues or not stats:
+        return 0
+
+    total = 0
+    for node_name, queues in active_queues.items():
+        queue_names = [q["name"] for q in queues]
+        if queue_name in queue_names and node_name in stats:
+            pool_size = stats[node_name].get("pool", {}).get("max-concurrency", 0)
+            total += pool_size
+
+    return total

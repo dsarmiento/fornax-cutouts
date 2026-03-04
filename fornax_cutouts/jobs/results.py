@@ -18,6 +18,7 @@ from fsspec import AbstractFileSystem, filesystem
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.constants import AWS_S3_REGION
 from fornax_cutouts.models.cutouts import CutoutResponse
+from fornax_cutouts.utils.pagination import get_pagination_metadata
 
 
 @dataclass
@@ -106,7 +107,7 @@ class CutoutResults:
             return pd.DataFrame()
 
 
-    def __get_pagination_metadata(self, page: int, limit: int) -> dict[str, dict[str, Any]]:
+    def __get_pagination_metadata(self, page: int, limit: int, base_url: str) -> dict[str, dict[str, Any]]:
         """
         Generate pagination links for the current page.
 
@@ -115,53 +116,31 @@ class CutoutResults:
         try:
             results_db = self.__duckdb_conn.read_parquet(self.results_path_template.format("*"))
             total_items = results_db.count("*").fetchone()[0]
-            total_pages = (total_items + limit - 1) // limit
         except duckdb.IOException:
-            total_pages = 0
+            total_items = 0
 
-        base_url = f"/api/v0/cutouts/async/{self.job_id}/results/cutouts"
-        metadata = {
-            "metadata": {
-                "page": page,
-                "limit": limit,
-                "totalItems": total_items,
-                "totalPages": total_pages,
-                "currentPage": page + 1
-            },
-            "links": {
-                "self": f"{base_url}?page={page}&size={limit}",
-                "first": f"{base_url}?page=0&size={limit}",
-                "last": f"{base_url}?page={total_pages - 1}&size={limit}"
-            },
-        }
+        return get_pagination_metadata(page, limit, total_items, base_url)
 
-        if page > 0:
-            metadata["links"]["prev"] = f"{base_url}?page={page - 1}&size={limit}"
 
-        if page < total_pages - 1:
-            metadata["links"]["next"] = f"{base_url}?page={page + 1}&size={limit}"
-
-        return metadata
-
-    def to_py(self, page: int = 0, limit: int = 100) -> dict:
+    def to_py(self, page: int = 0, limit: int = 100, base_url: str = "") -> dict:
         df = self.__get_results(page, limit)
         results = [CutoutResponse.model_validate(row.to_dict()) for _, row in df.iterrows()]
 
-        resp = self.__get_pagination_metadata(page, limit)
+        resp = self.__get_pagination_metadata(page, limit, base_url)
         resp["results"] = results
 
         return resp
 
-    def to_csv(self, page: int = 0, limit: int = 100) -> str:
+    def to_csv(self, page: int = 0, limit: int = 100, base_url: str = "") -> str:
         df = self.__get_results(page, limit)
         return df.to_csv(index=False)
 
-    def to_votable(self, page: int = 0, limit: int = 100) -> str:
+    def to_votable(self, page: int = 0, limit: int = 100, base_url: str = "") -> str:
         df = self.__get_results(page, limit)
         astro_t = AstroTable.from_pandas(df)
         vo_t = votable.from_table(astro_t)
 
-        pagination_metadata = self.__get_pagination_metadata(page, limit)
+        pagination_metadata = self.__get_pagination_metadata(page, limit, base_url)
 
         for info_name, info_value in pagination_metadata["metadata"].items():
             info = Info(

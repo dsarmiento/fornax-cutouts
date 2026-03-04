@@ -88,7 +88,6 @@ class CutoutsUWSHandler:
                 alias="RUNID",
             ),
         ] = "",
-        engine: Annotated[str, Form()] = "fits_cut",
     ):
         form = await request.form()
 
@@ -124,15 +123,6 @@ class CutoutsUWSHandler:
         }
 
         job_id = uuid.uuid4().hex[:8]
-        job_kwargs = {
-            "job_id": job_id,
-            "position": position,
-            "size": size,
-            "output_format": output_format,
-            "mission_params": mission_params,
-            "mode": engine,
-        }
-
         uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
 
         await uws_job.create_job(
@@ -142,7 +132,7 @@ class CutoutsUWSHandler:
 
         schedule_job.apply_async(
             task_id=f"schedule_job-{job_id}",
-            kwargs=job_kwargs,
+            kwargs={"job_id": job_id},
         )
         redirect_url = f"{request.url.path}/{job_id}"
         return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
@@ -150,6 +140,7 @@ class CutoutsUWSHandler:
     @uws_router.get("/async/{job_id}")
     async def get_job(
         self,
+        request: Request,
         job_id: Annotated[
             str,
             Path(description="Server-assigned job ID for the request"),
@@ -157,7 +148,7 @@ class CutoutsUWSHandler:
     ) -> JobSummary:
         try:
             uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
-            job_summary = await uws_job.get_job_summary()
+            job_summary = await uws_job.get_job_summary(base_url=request.url)
             return XmlResponse(job_summary.to_xml())
 
         except TypeError:
@@ -182,7 +173,7 @@ class CutoutsUWSHandler:
         The response to this request must have code 303 “See other” and the Location header of the response
         must point to the Job List at the /{jobs} URI.
         """
-        return
+        return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
     @uws_router.get("/async/{job_id}/phase")
     async def get_job_phase(
@@ -216,7 +207,7 @@ class CutoutsUWSHandler:
         Job control for existing jobs via POST per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
-        return
+        return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
     @uws_router.get("/async/{job_id}/executionduration")
     async def get_job_executionduration(
@@ -247,7 +238,7 @@ class CutoutsUWSHandler:
         Return job details per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
-        return
+        return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
     @uws_router.post("/async/{job_id}/destruction")
     def post_job_destruction(
@@ -268,7 +259,7 @@ class CutoutsUWSHandler:
         Destruction datetime is expected in ISO 8601 UTC format with Z for UTC times:
         https://www.ivoa.net/documents/VOResource/20180625/REC-VOResource-1.1.html#tth_sEc2.2.4
         """
-        return
+        return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
     @uws_router.get("/async/{job_id}/error")
     async def get_job_error(
@@ -300,7 +291,8 @@ class CutoutsUWSHandler:
         Return job details per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
-        job_summary = await self.uws_redis.get_job(job_id)
+        uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
+        job_summary = await uws_job.get_job_summary()
         return job_summary.quote if job_summary.quote is not None else ""
 
     @uws_router.get("/async/{job_id}/results")
@@ -359,6 +351,7 @@ class CutoutsUWSHandler:
     @uws_router.get("/async/{job_id}/results/cutouts")
     async def get_job_json_results(
         self,
+        request: Request,
         job_id: Annotated[
             str,
             Path(description="Server-assigned job ID for the request"),
@@ -382,13 +375,13 @@ class CutoutsUWSHandler:
         job_results = CutoutResults(job_id)
 
         if output_format == "json":
-            return job_results.to_py(page=page, limit=limit)
+            return job_results.to_py(page=page, limit=limit, base_url=request.url)
 
         if output_format == "csv":
-            return CsvResponse(job_results.to_csv(page=page, limit=limit))
+            return CsvResponse(job_results.to_csv(page=page, limit=limit, base_url=request.url))
 
         if output_format in ["votable", "xml"]:
-            return XmlResponse(job_results.to_votable(page=page, limit=limit))
+            return XmlResponse(job_results.to_votable(page=page, limit=limit, base_url=request.url))
 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -398,6 +391,7 @@ class CutoutsUWSHandler:
     @uws_router.get("/async/{job_id}/parameters")
     async def get_job_parameters(
         self,
+        request: Request,
         job_id: Annotated[
             str,
             Path(description="Server-assigned job ID for the request"),
@@ -408,8 +402,32 @@ class CutoutsUWSHandler:
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
         uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
-        job_parameters = await uws_job.get_job_parameters()
+        job_parameters = await uws_job.get_job_parameters(position_base_url=f"{request.url}/position")
         return XmlResponse(job_parameters.to_xml())
+
+    @uws_router.get("/async/{job_id}/parameters/position")
+    async def get_job_positions(
+        self,
+        request: Request,
+        job_id: Annotated[
+            str,
+            Path(description="Server-assigned job ID for the request"),
+        ],
+        page: Annotated[
+            int,
+            Query(description="Page number to return", ge=0),
+        ] = 0,
+        limit: Annotated[
+            int,
+            Query(description="Number of results per page", ge=1),
+        ] = 100,
+    ):
+        """
+        Return job positions in a JSON format
+        """
+        uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
+        job_positions = await uws_job.get_job_positions(page=page, limit=limit, base_url=request.url)
+        return job_positions
 
     @uws_router.post("/async/{job_id}/parameters")
     def post_job_parameters(
@@ -426,7 +444,7 @@ class CutoutsUWSHandler:
         """
         Update job parameters by submitting a POST of key-value pairs.
         """
-        return
+        return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
     @uws_router.get("/async/{job_id}/owner")
     async def get_job_owner(
