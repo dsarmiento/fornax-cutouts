@@ -23,7 +23,7 @@ from fornax_cutouts.utils.pagination import get_pagination_metadata
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
 CUTOUT_INDEX_NAME = "cutoutJobsIdx"
 CUTOUT_JOB_PREFIX = f"{CONFIG.worker.redis_prefix}:jobs"
-POSITIONS_BATCH_SIZE = 10000
+POSITIONS_BATCH_SIZE = 100_000
 
 
 @dataclass
