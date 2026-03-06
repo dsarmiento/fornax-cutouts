@@ -323,12 +323,14 @@ def generate_cutout(
         cutout_time = time.perf_counter()
 
         if fits_fname:
-            fs.put(lpath=fits_fname, rpath=output_dir)
-            fits_fname = fits_fname.replace(temp_output_dir, output_dir)
+            fits_dest_fname = fits_fname.replace(temp_output_dir, output_dir)
+            fs.put(lpath=fits_fname, rpath=fits_dest_fname)
+            fits_fname = fits_dest_fname
 
         if img_fname:
-            fs.put(lpath=img_fname, rpath=output_dir)
-            img_fname = img_fname.replace(temp_output_dir, output_dir)
+            img_dest_fname = img_fname.replace(temp_output_dir, output_dir)
+            fs.put(lpath=img_fname, rpath=img_dest_fname)
+            img_fname = img_dest_fname
 
         write_time = time.perf_counter()
 
