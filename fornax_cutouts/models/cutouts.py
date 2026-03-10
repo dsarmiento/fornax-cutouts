@@ -34,20 +34,28 @@ class CutoutRequest(BaseModel):
 
     @field_validator("position", mode="before")
     @classmethod
-    def parse_position(cls, value: TargetPosition | np.ndarray) -> TargetPosition:
+    def parse_position(cls, value: tuple[float, float] | TargetPosition | np.ndarray) -> TargetPosition:
+        if isinstance(value, tuple):
+            return TargetPosition(ra=value[0], dec=value[1])
+
         if isinstance(value, np.ndarray):
             if value.size != 2:
                 raise ValueError("position array must have exactly 2 elements (ra, dec)")
             return TargetPosition(ra=float(value[0]), dec=float(value[1]))
+
         return value
 
     @field_validator("size_px", mode="before")
     @classmethod
-    def parse_size_px(cls, value: tuple[int, int] | np.ndarray) -> tuple[int, int]:
+    def parse_size_px(cls, value: int | tuple[int, int] | np.ndarray) -> tuple[int, int]:
+        if isinstance(value, int):
+            return (value, value)
+
         if isinstance(value, np.ndarray):
             if value.size != 2:
                 raise ValueError("size_px array must have exactly 2 elements")
             return (int(value[0]), int(value[1]))
+
         return value
 
     @field_validator("mission_extras", mode="before")

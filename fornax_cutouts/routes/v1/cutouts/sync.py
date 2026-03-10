@@ -10,10 +10,9 @@ from fastapi_utils.cbv import cbv
 from fsspec import AbstractFileSystem, filesystem
 
 from fornax_cutouts.config import CONFIG
-from fornax_cutouts.constants import CUTOUT_STORAGE_IS_S3, CUTOUT_STORAGE_PREFIX
+from fornax_cutouts.jobs.tasks import generate_color_preview, generate_cutout
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
-from fornax_cutouts.tasks import generate_cutout, generate_color_preview
 
 sync_router = APIRouter(prefix="/cutouts")
 
@@ -50,7 +49,7 @@ class CutoutsSyncHandler:
         if not job_id:
             job_id = uuid.uuid4().hex[:8]
 
-        output_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/sync/{job_id}"
+        output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
 
         try:
             ret = await asyncio.to_thread(
@@ -68,7 +67,7 @@ class CutoutsSyncHandler:
                 detail=e,
             )
 
-        if CUTOUT_STORAGE_IS_S3:
+        if CONFIG.storage.is_s3:
             fs: AbstractFileSystem = filesystem("s3")
             if ret.fits:
                 ret.fits = fs.sign(ret.fits, expiration=CONFIG.sync_ttl)
@@ -76,9 +75,9 @@ class CutoutsSyncHandler:
                 ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
         else:
             if ret.fits:
-                ret.fits = ret.fits.replace(CUTOUT_STORAGE_PREFIX, "")
+                ret.fits = ret.fits.replace(CONFIG.storage.prefix, "")
             if ret.preview:
-                ret.preview = ret.preview.replace(CUTOUT_STORAGE_PREFIX, "")
+                ret.preview = ret.preview.replace(CONFIG.storage.prefix, "")
 
         return ret
 
@@ -99,7 +98,7 @@ class CutoutsSyncHandler:
         if not job_id:
             job_id = uuid.uuid4().hex[:8]
 
-        output_dir = f"{CUTOUT_STORAGE_PREFIX}/cutouts/sync/{job_id}"
+        output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
 
         try:
             ret = await asyncio.to_thread(
@@ -117,10 +116,10 @@ class CutoutsSyncHandler:
                 detail=e,
             )
 
-        if CUTOUT_STORAGE_IS_S3:
+        if CONFIG.storage.is_s3:
             fs: AbstractFileSystem = filesystem("s3")
             ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
         else:
-            ret.preview = ret.preview.replace(CUTOUT_STORAGE_PREFIX, "")
+            ret.preview = ret.preview.replace(CONFIG.storage.prefix, "")
 
         return ret

@@ -1,7 +1,6 @@
 import click
 
 from fornax_cutouts.config import CONFIG
-from fornax_cutouts.sources import cutout_registry
 
 # Normalize defaults from CONFIG.log_level
 _DEFAULT_LOG_LEVEL = getattr(CONFIG, "log_level", "INFO")
@@ -11,8 +10,7 @@ _CELERY_LOG_LEVEL_DEFAULT = str(_DEFAULT_LOG_LEVEL).upper()
 
 @click.group(help="CLI for Fornax Cutouts: launch API or Celery worker.")
 def cli():
-    # Discover sources before any subcommand runs.
-    cutout_registry.discover_sources()
+    pass
 
 
 @cli.command("api", help="Start the FastAPI/Uvicorn service.")
@@ -98,6 +96,13 @@ def api(
     help="Number of concurrent worker processes/threads.",
 )
 @click.option(
+    "-Q",
+    "--queues",
+    type=click.STRING,
+    default="cutouts,high_mem",
+    help="Comma-separated list of queues to consume from (e.g. 'cutouts,high_mem'). Defaults to 'cutouts,high_mem'.",
+)
+@click.option(
     "--log-level",
     type=click.Choice(["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"], case_sensitive=False),
     default=_CELERY_LOG_LEVEL_DEFAULT,
@@ -108,6 +113,7 @@ def worker(
     name: str | None,
     autoscale: str | None,
     concurrency: int | None,
+    queues: str | None,
     log_level: str,
 ):
     """Start Celery worker."""
@@ -124,6 +130,9 @@ def worker(
 
     if name:
         args.append(f"--hostname={name}")
+
+    if queues:
+        args.append(f"--queues={queues}")
 
     celery_app.worker_main(args)
 

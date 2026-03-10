@@ -48,7 +48,7 @@ class MetadataHandler:
             request_dict["position"] = resolved_positions
             request_dict = {k: v for k, v in request_dict.items() if v is not None}
 
-            mission_filenames = cutout_registry.get_mission(mission_name).get_filenames(**request_dict)
+            mission_filenames = cutout_registry.get_mission(mission_name).get_filenames(**request_dict, include_metadata=True)
 
             mission_total_files = len(mission_filenames)
             total_files += mission_total_files
