@@ -39,7 +39,7 @@ from fornax_cutouts.models.cutouts import FilenameLookupResponse, FilenameWithMe
 
 
 @cutout_registry.register_source("my_mission")
-class MySurveySource(AbstractMissionSource):
+class MyMissionSource(AbstractMissionSource):
     metadata = MissionMetadata(
         name="my_mission",
         pixel_size=0.5,           # arcseconds per pixel
@@ -139,7 +139,7 @@ from fornax_cutouts.models.cutouts import FilenameLookupResponse, FilenameWithMe
 
 
 @cutout_registry.register_source("my_mission")
-class MySurveySource(AbstractMissionSource):
+class MyMissionSource(AbstractMissionSource):
     metadata = MissionMetadata(
         name="my_mission",
         pixel_size=0.5,

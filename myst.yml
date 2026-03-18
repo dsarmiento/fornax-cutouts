@@ -1,8 +1,8 @@
 # See docs at: https://mystmd.org/guide/frontmatter
 version: 1
 project:
-  title: NASA Fornax Cutouts
-  subject: NASA Fornax Cutouts Documentation
+  title: Fornax Cutouts User Documentation
+  subject: Fornax Cutouts User Documentation
   description: Pluggable backend for async FITS image cutouts with FastAPI + Celery using the IVOA UWS standard
   github: https://github.com/nasa-fornax/fornax-cutouts
   license:
@@ -25,5 +25,5 @@ extends:
 site:
   template: book-theme
   options:
-    logo: docs/assets/imgs/fornax-logo.png
-    logo_text: NASA Fornax - Cutouts
+    favicon: docs/_static/fornax_favicon.ico
+    logo: docs/_static/fornax_logo.png
