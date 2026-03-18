@@ -1,0 +1,17 @@
+version: 1
+project:
+  toc:
+    - file: docs/index.md
+    - file: docs/getting-started.md
+    - title: Configuration
+      file: docs/configuration.md
+    - title: CLI
+      file: docs/cli.md
+    - title: API Reference
+      file: docs/api/index.md
+    - title: Sources
+      children:
+        - file: docs/sources/overview.md
+        - file: docs/sources/building-a-source.md
+    - title: Deployment
+      file: docs/deployment/index.md
