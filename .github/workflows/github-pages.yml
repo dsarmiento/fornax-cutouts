@@ -1,10 +1,18 @@
-# Deploy MyST documentation to GitHub Pages.
+# Deploy MyST docs to the gh-pages branch: one subfolder per branch (preserved across pushes).
 #
+# Setup (once): Settings → Pages → Build and deployment → Source: Deploy from a branch
+#   Branch: gh-pages, folder: / (root)
+#
+# URLs:
+#   https://<owner>.github.io/<repo>/<branch-name>/   (e.g. .../main/, .../feature/foo/)
+#   Site root redirects to main/ when main is rebuilt.
+#
+# Deleted remote branches do not remove old folders; clean up manually on gh-pages if needed.
 name: Deploy documentation to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     paths:
       - "docs/**"
       - "myst.yml"
@@ -13,16 +21,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
+# Serialize pushes to gh-pages so concurrent branch builds do not race.
 concurrency:
-  group: pages-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: gh-pages-deploy
+  cancel-in-progress: false
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -38,21 +45,33 @@ jobs:
 
       - name: Build static HTML
         env:
-          BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ github.ref_name }}/
         run: myst build --html --ci
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Deploy branch folder on gh-pages
+        uses: JamesIves/github-pages-deploy-action@v4
         with:
-          path: _build/html
+          folder: _build/html
+          branch: gh-pages
+          target-folder: ${{ github.ref_name }}
+          clean: false
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Write site root redirect to main/
+        if: github.ref_name == 'main'
+        run: |
+          mkdir -p _redirect
+          printf '%s\n' \
+            '<!DOCTYPE html>' \
+            '<html lang="en"><head><meta charset="utf-8">' \
+            '<meta http-equiv="refresh" content="0; url=main/">' \
+            '<title>Redirecting…</title></head>' \
+            '<body><p>Redirecting to <a href="main/">documentation</a>…</p></body></html>' \
+            > _redirect/index.html
+
+      - name: Deploy root redirect (main only)
+        if: github.ref_name == 'main'
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: _redirect
+          branch: gh-pages
+          clean: false
