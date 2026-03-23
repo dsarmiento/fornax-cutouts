@@ -9,6 +9,17 @@ Fornax Cutouts is a pluggable backend for generating asynchronous FITS image cut
 
 The library is designed to be extended: you define mission-specific data sources, register them with the cutout registry, and the framework handles job queuing, worker dispatch, result storage, and API exposure automatically.
 
+Currently the supported filetypes to generate cutouts for in this service are:
+
+- `FITS`
+  - Images
+
+With future support to include:
+
+- `ASDF`
+  - Images
+  - 2D Spectra
+
 ---
 
 ## Infrastructure Architecture
@@ -64,6 +75,12 @@ Individual cutout tasks within a job run in parallel via a Celery [chord](https:
 
 ---
 
+## Celery task pipeline
+
+On submission, the API enqueues **`schedule_job`**, which validates parameters, materializes per-cutout **descriptors** in Redis, and starts **`batch_cutouts`**. Each `batch_cutouts` run builds a **chord**: parallel **`execute_cutout`** workers (queue `cutouts`) followed by a single **`write_results`** callback (queue `high_mem`) that appends to Parquet and either schedules the next batch or marks the job complete. See [Celery tasks and the async pipeline](celery-tasks.md) for task tables, queue notes, and dependency diagrams.
+
+---
+
 ## Key Concepts
 
 | Concept      | Description                                                         |
@@ -80,6 +97,7 @@ Individual cutout tasks within a job run in parallel via a Celery [chord](https:
 
 - [Getting Started](getting-started.md) — install and run locally
 - [Configuration](configuration.md) — all environment variables
-- [CLI Reference](cli.md) — `fornax-cutouts api` and `fornax-cutouts worker`
+- [CLI Reference](cli.md) — entrypoint for the fornax-cutouts service (`api` & `worker`)
 - [API Reference](api/index.md) — REST endpoints and Swagger UI
 - [Building a Source](sources/building-a-source.md) — implement your first mission source
+- [Celery tasks](celery-tasks.md) — service tasks and task architecture
