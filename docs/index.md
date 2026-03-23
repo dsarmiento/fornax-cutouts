@@ -5,7 +5,7 @@ description: Pluggable backend for async FITS image cutouts with FastAPI + Celer
 
 # Fornax Cutouts
 
-Fornax Cutouts is a pluggable backend for generating asynchronous FITS image cutouts. It is built on [FastAPI](https://fastapi.tiangolo.com/) and [Celery](https://docs.celeryq.dev/), and implements the [IVOA UWS](https://www.ivoa.net/documents/UWS/) (Universal Worker Service) standard for async job management.
+Fornax Cutouts is a pluggable backend for generating asynchronous FITS image cutouts. The service is built on [FastAPI](https://fastapi.tiangolo.com/) and [Celery](https://docs.celeryq.dev/), and implements the [IVOA UWS](https://www.ivoa.net/documents/UWS/) (Universal Worker Service) standard for async job management. The Celery workers use [astrocut](https://astrocut.readthedocs.io/) (Astropy-based FITS cutouts and previews) to perform the actual cutouts within the [pipeline](celery-tasks.md).
 
 The library is designed to be extended: you define mission-specific data sources, register them with the cutout registry, and the framework handles job queuing, worker dispatch, result storage, and API exposure automatically.
 
