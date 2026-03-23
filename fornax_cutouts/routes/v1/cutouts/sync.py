@@ -14,12 +14,16 @@ from fornax_cutouts.jobs.tasks import generate_color_preview, generate_cutout
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
 
-sync_router = APIRouter(prefix="/cutouts")
+sync_router = APIRouter(prefix="/cutouts", tags=["Sync Cutouts"])
 
 
 @cbv(sync_router)
 class CutoutsSyncHandler:
-    @sync_router.get("/sync")
+    @sync_router.get(
+        "/sync",
+        summary="Redirect to single cutout",
+        description="Redirects to /sync/single, preserving all query parameters.",
+    )
     async def get_cutout(self, request: Request):
         """
         Redirect to the /single endpoint, keeping all query params
@@ -29,7 +33,11 @@ class CutoutsSyncHandler:
         redirect_url = f"{request.url.path}/single?{new_query}"
         return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
-    @sync_router.get("/sync/single")
+    @sync_router.get(
+        "/sync/single",
+        summary="Generate single FITS/JPEG cutout",
+        description="Generate a FITS and optional JPEG preview cutout for a specified source at given coordinates.",
+    )
     async def get_single_cutout(
         self,
         filename: Annotated[str, Query(description="Publicly available source URL/S3 URI to generate a cutout for")],
@@ -81,7 +89,11 @@ class CutoutsSyncHandler:
 
         return ret
 
-    @sync_router.get("/sync/color")
+    @sync_router.get(
+        "/sync/color",
+        summary="Generate color JPEG cutout",
+        description="Generate a color JPEG preview by combining red, green, and blue channel cutouts.",
+    )
     async def get_color_cutout(
         self,
         red: Annotated[str, Query(description="Red channel for a color cutout preview")],

@@ -17,8 +17,16 @@ from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, a
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
 from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.utils.html_link import html_link
 
-uws_router = APIRouter(prefix="/cutouts")
+uws_router = APIRouter(prefix="/cutouts", tags=["Async Cutouts (UWS)"])
+
+UWS_SPEC = "https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html"
+UWS_RESTBINDING = "https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding"
+UWS_DELETE = "https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#d1e1390"
+UWS_DESTRUCTION = "https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#DestructionTime"
+VORESOURCE_DATETIME = "https://www.ivoa.net/documents/VOResource/20180625/REC-VOResource-1.1.html#tth_sEc2.2.4"
+DALI_RUNID = "https://www.ivoa.net/documents/DALI/20170517/REC-DALI-1.1.html#tth_sEc3.4.6"
 
 
 class PhaseAction(StrEnum):
@@ -40,7 +48,11 @@ class CsvResponse(Response):
 class CutoutsUWSHandler:
     redis_client: Redis | RedisCluster = Depends(async_redis_client_factory)
 
-    @uws_router.get("/async")
+    @uws_router.get(
+        "/async",
+        summary="List async jobs",
+        description=f"Returns job list per {html_link(UWS_SPEC, 'IVOA UWS 1.1')}. Redirects to add last=100 if not specified.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     async def get_jobs(
         self,
         request: Request,
@@ -72,14 +84,17 @@ class CutoutsUWSHandler:
         jobs = await async_get_uws_jobs(redis_client=self.redis_client, phase=phase, after=after, last=last)
         return XmlResponse(jobs.to_xml())
 
-    @uws_router.post("/async")
+    @uws_router.post(
+        "/async",
+        summary="Create async job",
+        description=f"Submit a new cutout job. Accepts multipart form with position, size, output_format, and mission-specific params. RUNID per DALI.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}\n{html_link(DALI_RUNID, 'DALI 1.1 RUNID')}",
+    )
     async def post_job(
         self,
         request: Request,
         position: Annotated[list[str], Form()],
         size: Annotated[int, Form()],
         output_format: Annotated[list[str], Form()] = ["fits"],
-        # relevant spec: https://www.ivoa.net/documents/DALI/20170517/REC-DALI-1.1.html#tth_sEc3.4.6
         run_id: Annotated[
             str,
             Form(
@@ -137,7 +152,11 @@ class CutoutsUWSHandler:
         redirect_url = f"{request.url.path}/{job_id}"
         return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
-    @uws_router.get("/async/{job_id}")
+    @uws_router.get(
+        "/async/{job_id}",
+        summary="Get job summary",
+        description=f"Returns job summary XML per IVOA UWS 1.1.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     async def get_job(
         self,
         request: Request,
@@ -157,7 +176,11 @@ class CutoutsUWSHandler:
                 detail=f"Cutout job {job_id!r} not found.",
             )
 
-    @uws_router.delete("/async/{job_id}")
+    @uws_router.delete(
+        "/async/{job_id}",
+        summary="Delete job",
+        description=f"Destroys job per UWS spec. Currently returns 501 Not Implemented.\n\n{html_link(UWS_DELETE, 'UWS 1.1 Job deletion')}",
+    )
     def delete_job(
         self,
         job_id: Annotated[
@@ -175,7 +198,11 @@ class CutoutsUWSHandler:
         """
         return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
-    @uws_router.get("/async/{job_id}/phase")
+    @uws_router.get(
+        "/async/{job_id}/phase",
+        summary="Get job phase",
+        description=f"Returns current execution phase (PENDING, QUEUED, EXECUTING, COMPLETED, ERROR, HELD, SUSPENDED, ABORTED, UNKNOWN).\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     async def get_job_phase(
         self,
         job_id: Annotated[
@@ -191,7 +218,11 @@ class CutoutsUWSHandler:
         job_summary = await uws_job.get_job_summary()
         return job_summary.phase
 
-    @uws_router.post("/async/{job_id}/phase")
+    @uws_router.post(
+        "/async/{job_id}/phase",
+        summary="Set job phase",
+        description=f"Job control via POST (ABORT, RUN). Currently returns 501 Not Implemented.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     def post_job_phase(
         self,
         job_id: Annotated[
@@ -209,7 +240,11 @@ class CutoutsUWSHandler:
         """
         return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
-    @uws_router.get("/async/{job_id}/executionduration")
+    @uws_router.get(
+        "/async/{job_id}/executionduration",
+        summary="Get execution duration",
+        description=f"Returns estimated execution duration in seconds. Currently returns 0 (not estimated).\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     async def get_job_executionduration(
         self,
         job_id: Annotated[
@@ -226,7 +261,11 @@ class CutoutsUWSHandler:
         job_summary = await uws_job.get_job_summary()
         return job_summary.execution_duration
 
-    @uws_router.get("/async/{job_id}/destruction")
+    @uws_router.get(
+        "/async/{job_id}/destruction",
+        summary="Get destruction time",
+        description=f"Returns proposed job destruction time. Currently returns 501 Not Implemented.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     def get_job_destruction(
         self,
         job_id: Annotated[
@@ -240,7 +279,11 @@ class CutoutsUWSHandler:
         """
         return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
-    @uws_router.post("/async/{job_id}/destruction")
+    @uws_router.post(
+        "/async/{job_id}/destruction",
+        summary="Set destruction time",
+        description=f"Set proposed job destruction time (ISO 8601 UTC). Currently returns 501 Not Implemented.\n\n{html_link(UWS_DESTRUCTION, 'UWS 1.1 Destruction time')}\n{html_link(VORESOURCE_DATETIME, 'VOResource datetime format')}",
+    )
     def post_job_destruction(
         self,
         job_id: Annotated[
@@ -261,7 +304,11 @@ class CutoutsUWSHandler:
         """
         return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
-    @uws_router.get("/async/{job_id}/error")
+    @uws_router.get(
+        "/async/{job_id}/error",
+        summary="Get job error",
+        description=f"Returns error summary if job failed. Empty 200 OK if no errors.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     async def get_job_error(
         self,
         job_id: Annotated[
@@ -278,7 +325,11 @@ class CutoutsUWSHandler:
         job_summary = await uws_job.get_job_summary()
         return job_summary.error_summary
 
-    @uws_router.get("/async/{job_id}/quote")
+    @uws_router.get(
+        "/async/{job_id}/quote",
+        summary="Get execution quote",
+        description=f"Returns estimated execution time. Currently returns empty string (quotes not provided).\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     async def get_job_quote(
         self,
         job_id: Annotated[
@@ -295,7 +346,11 @@ class CutoutsUWSHandler:
         job_summary = await uws_job.get_job_summary()
         return job_summary.quote if job_summary.quote is not None else ""
 
-    @uws_router.get("/async/{job_id}/results")
+    @uws_router.get(
+        "/async/{job_id}/results",
+        summary="Get results index",
+        description=f"Returns XML with links to results/summary and results/cutouts.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     async def get_job_results(
         self,
         job_id: Annotated[
@@ -332,7 +387,11 @@ class CutoutsUWSHandler:
         )
         return XmlResponse(results.to_xml())
 
-    @uws_router.get("/async/{job_id}/results/summary")
+    @uws_router.get(
+        "/async/{job_id}/results/summary",
+        summary="Get results summary",
+        description="Returns JSON summary of job results (status, cutout counts, download URLs).",
+    )
     async def get_job_summary_results(
         self,
         job_id: Annotated[
@@ -348,7 +407,11 @@ class CutoutsUWSHandler:
 
         return job_summary
 
-    @uws_router.get("/async/{job_id}/results/cutouts")
+    @uws_router.get(
+        "/async/{job_id}/results/cutouts",
+        summary="Get cutout results",
+        description="Returns cutout results in JSON, CSV, VOTable, or XML format with pagination.",
+    )
     async def get_job_json_results(
         self,
         request: Request,
@@ -388,7 +451,11 @@ class CutoutsUWSHandler:
             detail=f"Invalid output format: {output_format}",
         )
 
-    @uws_router.get("/async/{job_id}/parameters")
+    @uws_router.get(
+        "/async/{job_id}/parameters",
+        summary="Get job parameters",
+        description=f"Returns job parameters XML per IVOA UWS 1.1.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     async def get_job_parameters(
         self,
         request: Request,
@@ -405,7 +472,11 @@ class CutoutsUWSHandler:
         job_parameters = await uws_job.get_job_parameters(position_base_url=f"{request.url}/position")
         return XmlResponse(job_parameters.to_xml())
 
-    @uws_router.get("/async/{job_id}/parameters/position")
+    @uws_router.get(
+        "/async/{job_id}/parameters/position",
+        summary="Get job positions",
+        description="Returns position parameters in JSON with pagination.",
+    )
     async def get_job_positions(
         self,
         request: Request,
@@ -429,7 +500,11 @@ class CutoutsUWSHandler:
         job_positions = await uws_job.get_job_positions(page=page, limit=limit, base_url=request.url)
         return job_positions
 
-    @uws_router.post("/async/{job_id}/parameters")
+    @uws_router.post(
+        "/async/{job_id}/parameters",
+        summary="Update job parameters",
+        description="Update job parameters via POST. Currently returns 501 Not Implemented.",
+    )
     def post_job_parameters(
         self,
         job_id: Annotated[
@@ -446,7 +521,11 @@ class CutoutsUWSHandler:
         """
         return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
 
-    @uws_router.get("/async/{job_id}/owner")
+    @uws_router.get(
+        "/async/{job_id}/owner",
+        summary="Get job owner",
+        description=f"Returns owner ID for the job per IVOA UWS 1.1.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+    )
     async def get_job_owner(
         self,
         job_id: Annotated[

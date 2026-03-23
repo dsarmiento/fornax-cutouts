@@ -7,16 +7,24 @@ from fornax_cutouts.models.metadata import FilenameRequest
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
-metadata_router = APIRouter()
+metadata_router = APIRouter(tags=["Metadata"])
 
 
 @cbv(metadata_router)
 class MetadataHandler:
-    @metadata_router.get("/missions")
+    @metadata_router.get(
+        "/missions",
+        summary="List available missions",
+        description="Returns metadata for all registered cutout missions/surveys.",
+    )
     def get_missions(self):
         return cutout_registry.get_mission_metadata()
 
-    @metadata_router.get("/missions/{mission}")
+    @metadata_router.get(
+        "/missions/{mission}",
+        summary="Get mission metadata",
+        description="Returns metadata for a specific mission (filters, bands, etc.).",
+    )
     def get_mission(
         self,
         mission: str,
@@ -28,7 +36,11 @@ class MetadataHandler:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Mission does not exist"
             )
 
-    @metadata_router.post("/filenames")
+    @metadata_router.post(
+        "/filenames",
+        summary="Get filenames for multiple missions",
+        description="Resolve positions and return matching FITS filenames for one or more missions.",
+    )
     def get_filenames(
         self,
         position: Annotated[list[str], Body()],
@@ -68,7 +80,11 @@ class MetadataHandler:
             "missions": mission_result,
         }
 
-    @metadata_router.post("/filenames/{mission}")
+    @metadata_router.post(
+        "/filenames/{mission}",
+        summary="Get filenames for a mission",
+        description="Resolve positions and return matching FITS filenames for a single mission.",
+    )
     def get_mission_filenames(
         self,
         mission: str,
