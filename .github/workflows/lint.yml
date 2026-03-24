@@ -1,0 +1,25 @@
+name: Lint and Format
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (dev)
+        run: uv sync --group dev
+
+      - name: Run pre-commit
+        run: uv run pre-commit run --all-files
