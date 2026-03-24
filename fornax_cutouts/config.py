@@ -9,6 +9,7 @@ class DeploymentType(StrEnum):
     LOCAL = "local"
     AWS = "aws"
 
+
 class DeploymentEnvironment(StrEnum):
     DEV = "dev"
     TEST = "test"
@@ -32,7 +33,7 @@ class RedisConfig(BaseModel):
         return {
             "host": self.host,
             "port": self.port,
-            "ssl": self.use_ssl
+            "ssl": self.use_ssl,
         }
 
 
@@ -42,12 +43,14 @@ class WorkerConfig(BaseModel):
     prefetch_multiplier: int = 1
     max_tasks_per_child: int = 50
 
+
 class StorageConfig(BaseModel):
     prefix: str = "/tmp"
 
     @property
     def is_s3(self):
         return self.prefix.startswith("s3://")
+
 
 class FornaxCutoutsConfig(BaseSettings):
     model_config = SettingsConfigDict(
@@ -71,7 +74,6 @@ class FornaxCutoutsConfig(BaseSettings):
     source_path: Path
 
     storage: StorageConfig = Field(default_factory=StorageConfig)
-
 
     @model_validator(mode="after")
     def set_redis_prefix_from_service_name(self):

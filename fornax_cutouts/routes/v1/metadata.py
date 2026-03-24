@@ -33,7 +33,8 @@ class MetadataHandler:
             return cutout_registry.get_mission(mission).metadata
         except KeyError:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Mission does not exist"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Mission does not exist",
             )
 
     @metadata_router.post(
@@ -60,7 +61,11 @@ class MetadataHandler:
             request_dict["position"] = resolved_positions
             request_dict = {k: v for k, v in request_dict.items() if v is not None}
 
-            mission_filenames = cutout_registry.get_mission(mission_name).get_filenames(**request_dict, include_metadata=True)
+            mission_source = cutout_registry.get_mission(mission_name)
+            mission_filenames = mission_source.get_filenames(
+                **request_dict,
+                include_metadata=True,
+            )
 
             mission_total_files = len(mission_filenames)
             total_files += mission_total_files

@@ -2,6 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Annotated
 
 from fastapi import Depends, FastAPI
 from redis.asyncio import Redis, RedisCluster
@@ -13,6 +14,7 @@ from fornax_cutouts.routes.v1 import api_v1
 from fornax_cutouts.sources import cutout_registry
 
 logger = logging.getLogger("uvicorn")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,7 +37,7 @@ main_app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
-main_app.include_router(api_v1, prefix="/api/v0")   # Beta routes, eventually will be promoted to v1
+main_app.include_router(api_v1, prefix="/api/v0")  # Beta routes, eventually will be promoted to v1
 
 
 @main_app.get(
@@ -44,9 +46,7 @@ main_app.include_router(api_v1, prefix="/api/v0")   # Beta routes, eventually wi
     summary="Health check",
     description="Returns service status. Checks database connectivity; returns 'degraded' if the database is unreachable.",
 )
-async def health_check(
-    redis_client: Redis | RedisCluster = Depends(async_redis_client_factory)
-):
+async def health_check(redis_client: Annotated[Redis | RedisCluster, Depends(async_redis_client_factory)]):
     health_response = {
         "status": "ok",
         "details": "",
@@ -67,15 +67,15 @@ async def health_check(
 
     return health_response
 
+
 if CONFIG.deployment_environment == "dev":
+
     @main_app.get(
-    "/api/dev/flushdb",
-    tags=["Development"],
-    summary="Flush the Redisdatabase",
-    description="Flushes all keys from Redis. Only available when in the development environment.",
-)
-    async def flush_db(
-        redis_client: Redis | RedisCluster = Depends(async_redis_client_factory)
-    ):
+        "/api/dev/flushdb",
+        tags=["Development"],
+        summary="Flush the Redisdatabase",
+        description="Flushes all keys from Redis. Only available when in the development environment.",
+    )
+    async def flush_db(redis_client: Annotated[Redis | RedisCluster, Depends(async_redis_client_factory)]):
         await redis_client.flushdb()
         return {"message": "Database flushed"}

@@ -166,6 +166,7 @@ async def async_get_uws_jobs(
     jobs = Jobs(jobref=uws_jobs)
     return jobs
 
+
 class AsyncRedisCutoutJob:
     def __init__(
         self,
@@ -255,7 +256,14 @@ class AsyncRedisCutoutJob:
             pipe.llen(self.__keys.failed_tasks)
             pipe.get(self.__keys.total_task_count)
 
-            pending_tasks, queued_tasks, executing_tasks, completed_tasks, failed_tasks, total_tasks = await pipe.execute()
+            (
+                pending_tasks,
+                queued_tasks,
+                executing_tasks,
+                completed_tasks,
+                failed_tasks,
+                total_tasks,
+            ) = await pipe.execute()
 
         pending_tasks = int(pending_tasks) if pending_tasks else 0
         queued_tasks = int(queued_tasks) if queued_tasks else 0
@@ -288,6 +296,7 @@ class AsyncRedisCutoutJob:
         metadata = get_pagination_metadata(page, limit, len(positions), base_url)
         metadata["positions"] = positions
         return metadata
+
 
 class SyncRedisCutoutJob:
     def __init__(self, redis_client: SyncRedisClient | SyncRedisCluster, job_id: str):

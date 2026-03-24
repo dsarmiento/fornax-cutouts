@@ -21,7 +21,13 @@ from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 
-@celery_app.task(bind=True, ignore_result=True, soft_time_limit=30*60, time_limit=35*60, queue="high_mem")
+@celery_app.task(
+    bind=True,
+    ignore_result=True,
+    soft_time_limit=30 * 60,
+    time_limit=35 * 60,
+    queue="high_mem",
+)
 def schedule_job(
     self: Task,
     job_id: str,
@@ -36,11 +42,7 @@ def schedule_job(
     output_format = job_parameters.pop("output_format")
 
     source_names = cutout_registry.get_source_names()
-    mission_params = {
-        mission: params
-        for mission, params in job_parameters.items()
-        if mission in source_names
-    }
+    mission_params = {mission: params for mission, params in job_parameters.items() if mission in source_names}
 
     r.update_job_phase(ExecutionPhase.QUEUED)
     redis_update_time = time.perf_counter()
@@ -114,11 +116,18 @@ def schedule_job(
         "push_pending_tasks_time": push_pending_tasks_time - validate_mission_params_time,
         "metadata_update_time": metadata_update_time - push_pending_tasks_time,
         "batch_cutouts_task_time": batch_cutouts_task_time - metadata_update_time,
-        "schedule_job_total_time": batch_cutouts_task_time - start_time
+        "schedule_job_total_time": batch_cutouts_task_time - start_time,
     }
     logger.info(timings)
 
-@celery_app.task(bind=True, ignore_result=True, soft_time_limit=30*60, time_limit=35*60, queue="high_mem")
+
+@celery_app.task(
+    bind=True,
+    ignore_result=True,
+    soft_time_limit=30 * 60,
+    time_limit=35 * 60,
+    queue="high_mem",
+)
 def batch_cutouts(self: Task, job_id: str):
     """
     Chunked batcher: pops descriptors from Redis in batches and creates generate_cutout tasks
@@ -145,7 +154,6 @@ def batch_cutouts(self: Task, job_id: str):
     # Build signatures for all cutout tasks in this batch
     cutout_sigs = []
     for increment_id, desc in enumerate(descriptors):
-
         # Convert target list back to TargetPosition NamedTuple
         target = TargetPosition(ra=desc["target"][0], dec=desc["target"][1])
         sig = execute_cutout.si(
@@ -179,7 +187,11 @@ def batch_cutouts(self: Task, job_id: str):
     }
     logger.info(timings)
 
-@celery_app.task(bind=True, queue="high_mem")
+
+@celery_app.task(
+    bind=True,
+    queue="high_mem",
+)
 def write_results(self: Task, results: list[CutoutResponse | dict | None], job_id: str):
     """
     Chord callback: receives results from a batch of generate_cutout tasks and writes them to AsyncCutoutResults.
@@ -341,7 +353,7 @@ def generate_cutout(
         "start_time": cutout_start_time - init_time,
         "cutout_time": cutout_time - cutout_start_time,
         "write_time": write_time - cutout_time,
-        "generate_cutout_total_time": end_time - start_time
+        "generate_cutout_total_time": end_time - start_time,
     }
     logger.info(timings)
 
@@ -356,6 +368,7 @@ def generate_cutout(
         preview=img_fname,
         mission_extras=mission_extras,
     )
+
 
 def generate_color_preview(
     red: str,
@@ -417,7 +430,11 @@ def generate_color_preview(
     )
 
 
-@celery_app.task(bind=True, pydantic=True, queue="cutouts")
+@celery_app.task(
+    bind=True,
+    pydantic=True,
+    queue="cutouts",
+)
 def execute_cutout(
     self: Task,
     job_id: str,
@@ -490,7 +507,7 @@ def execute_cutout(
         "start_status_update_time": status_update_time - redis_factory_time,
         "cutout_time": cutout_time - status_update_time,
         "end_status_update_time": end_status_update_time - cutout_time,
-        "execute_cutout_total_time": end_status_update_time - start_time
+        "execute_cutout_total_time": end_status_update_time - start_time,
     }
     logger.info(timings)
     return resp

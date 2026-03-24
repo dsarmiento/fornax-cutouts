@@ -54,7 +54,7 @@ class CutoutResults:
             self.__fs = filesystem("s3")
 
         if not self.__is_s3 and not self.__fs.isdir(self.results_dir):
-                self.__fs.mkdir(self.results_dir)
+            self.__fs.mkdir(self.results_dir)
 
     def __del__(self):
         self.__duckdb_conn.close()
@@ -106,7 +106,6 @@ class CutoutResults:
             print(f"Error getting results: {e}")
             return pd.DataFrame()
 
-
     def __get_pagination_metadata(self, page: int, limit: int, base_url: str) -> dict[str, dict[str, Any]]:
         """
         Generate pagination links for the current page.
@@ -120,7 +119,6 @@ class CutoutResults:
             total_items = 0
 
         return get_pagination_metadata(page, limit, total_items, base_url)
-
 
     def to_py(self, page: int = 0, limit: int = 100, base_url: str = "") -> dict:
         df = self.__get_results(page, limit)
