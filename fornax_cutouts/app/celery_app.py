@@ -13,7 +13,8 @@ from fornax_cutouts.sources import cutout_registry
 
 logger = get_task_logger("cutouts")
 
-redis_client: Redis | RedisCluster | None= None
+redis_client: Redis | RedisCluster | None = None
+
 
 def redis_client_factory() -> Redis | RedisCluster:
     global redis_client
@@ -23,11 +24,12 @@ def redis_client_factory() -> Redis | RedisCluster:
 
     return redis_client
 
+
 celery_app = Celery(
     "fornax-cutouts",
     broker=CONFIG.redis.uri,
     backend=CONFIG.redis.uri,
-    include=["fornax_cutouts.jobs.tasks"]
+    include=["fornax_cutouts.jobs.tasks"],
 )
 
 conf_update = {
@@ -89,7 +91,14 @@ def _monkey_patch_astrocut():
         _orig_load = fits_cutout.FITSCutout._load_file_data
 
         def _patched_load(self, input_file):
-            fsspec_kwargs = {"anon": True, "default_block_size": block_size_bytes} if "s3://" in str(input_file) else None
+            fsspec_kwargs = (
+                {
+                    "anon": True,
+                    "default_block_size": block_size_bytes,
+                }
+                if "s3://" in str(input_file)
+                else None
+            )
             hdulist = fits.open(input_file, mode="denywrite", memmap=True, fsspec_kwargs=fsspec_kwargs)
             infile_exts = np.where([hdu.is_image and hdu.size > 0 for hdu in hdulist])[0]
             cutout_inds = self._parse_extensions(input_file, infile_exts)

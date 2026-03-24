@@ -2,17 +2,19 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Annotated
 
 from fastapi import Depends, FastAPI
 from redis.asyncio import Redis, RedisCluster
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from fornax_cutouts.constants import ENVIRONMENT_NAME
+from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import async_redis_client_factory, setup_index, sync_redis_client_factory
 from fornax_cutouts.routes.v1 import api_v1
 from fornax_cutouts.sources import cutout_registry
 
 logger = logging.getLogger("uvicorn")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,14 +31,22 @@ async def lifespan(app: FastAPI):
     yield
 
 
-main_app = FastAPI(lifespan=lifespan)
-main_app.include_router(api_v1, prefix="/api/v0")   # Beta routes, eventually will be promoted to v1
+main_app = FastAPI(
+    title=f"{CONFIG.service_name} API",
+    description="Pluggable backend for async FITS image cutouts. Implements IVOA UWS 1.1 for job management.",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+main_app.include_router(api_v1, prefix="/api/v0")  # Beta routes, eventually will be promoted to v1
 
 
-@main_app.get("/api/health")
-async def health_check(
-    redis_client: Redis | RedisCluster = Depends(async_redis_client_factory)
-):
+@main_app.get(
+    "/api/health",
+    tags=["Health"],
+    summary="Health check",
+    description="Returns service status. Checks database connectivity; returns 'degraded' if the database is unreachable.",
+)
+async def health_check(redis_client: Annotated[Redis | RedisCluster, Depends(async_redis_client_factory)]):
     health_response = {
         "status": "ok",
         "details": "",
@@ -52,15 +62,20 @@ async def health_check(
         health_response["status"] = "degraded"
         health_response["details"] = "database connection error"
 
-    if ENVIRONMENT_NAME != "ops":
-        health_response["environment"] = ENVIRONMENT_NAME
+    if CONFIG.deployment_environment != "prod":
+        health_response["environment"] = CONFIG.deployment_environment
 
     return health_response
 
-if ENVIRONMENT_NAME == "dev":
-    @main_app.get("/api/dev/flushdb")
-    async def flush_db(
-        redis_client: Redis | RedisCluster = Depends(async_redis_client_factory)
-    ):
+
+if CONFIG.deployment_environment == "dev":
+
+    @main_app.get(
+        "/api/dev/flushdb",
+        tags=["Development"],
+        summary="Flush the Redisdatabase",
+        description="Flushes all keys from Redis. Only available when in the development environment.",
+    )
+    async def flush_db(redis_client: Annotated[Redis | RedisCluster, Depends(async_redis_client_factory)]):
         await redis_client.flushdb()
         return {"message": "Database flushed"}

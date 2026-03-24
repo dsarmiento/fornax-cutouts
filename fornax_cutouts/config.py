@@ -1,7 +1,19 @@
+from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class DeploymentType(StrEnum):
+    LOCAL = "local"
+    AWS = "aws"
+
+
+class DeploymentEnvironment(StrEnum):
+    DEV = "dev"
+    TEST = "test"
+    PROD = "prod"
 
 
 class RedisConfig(BaseModel):
@@ -21,15 +33,16 @@ class RedisConfig(BaseModel):
         return {
             "host": self.host,
             "port": self.port,
-            "ssl": self.use_ssl
+            "ssl": self.use_ssl,
         }
 
 
 class WorkerConfig(BaseModel):
-    redis_prefix: str = "fornax-cutouts"
+    redis_prefix: str | None = None
     batch_size_per_worker: int = 5
     prefetch_multiplier: int = 1
     max_tasks_per_child: int = 50
+
 
 class StorageConfig(BaseModel):
     prefix: str = "/tmp"
@@ -38,12 +51,18 @@ class StorageConfig(BaseModel):
     def is_s3(self):
         return self.prefix.startswith("s3://")
 
+
 class FornaxCutoutsConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="cutouts__",
         env_nested_delimiter="__",
         env_file=".env",
     )
+
+    service_name: str = "Fornax Cutouts"
+
+    deployment_type: DeploymentType = "local"
+    deployment_environment: DeploymentEnvironment = "dev"
 
     redis: RedisConfig = Field(default_factory=RedisConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
@@ -55,6 +74,12 @@ class FornaxCutoutsConfig(BaseSettings):
     source_path: Path
 
     storage: StorageConfig = Field(default_factory=StorageConfig)
+
+    @model_validator(mode="after")
+    def set_redis_prefix_from_service_name(self):
+        if self.worker.redis_prefix is None:
+            self.worker.redis_prefix = self.service_name.lower().replace(" ", "-")
+        return self
 
 
 CONFIG = FornaxCutoutsConfig()

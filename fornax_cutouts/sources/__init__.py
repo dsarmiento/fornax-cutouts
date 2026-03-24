@@ -6,5 +6,5 @@ cutout_registry = CutoutRegistry()
 __all__ = [
     AbstractMissionSource,
     MissionMetadata,
-    cutout_registry
+    cutout_registry,
 ]

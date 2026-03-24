@@ -44,7 +44,8 @@ def cli():
 @click.option(
     "--log-level",
     type=click.Choice(
-        ["critical", "error", "warning", "info", "debug", "trace"], case_sensitive=False
+        ["critical", "error", "warning", "info", "debug", "trace"],
+        case_sensitive=False,
     ),
     default=_UVICORN_LOG_LEVEL_DEFAULT,
     show_default=True,
@@ -66,7 +67,6 @@ def api(
 
     from fornax_cutouts.app.api import main_app
 
-
     uvicorn.run(
         main_app,
         host=host,
@@ -82,7 +82,7 @@ def api(
     "-n",
     "--name",
     type=click.STRING,
-    help="Unique name for the celery worker."
+    help="Unique name for the celery worker.",
 )
 @click.option(
     "--autoscale",
@@ -104,7 +104,10 @@ def api(
 )
 @click.option(
     "--log-level",
-    type=click.Choice(["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"], case_sensitive=False),
+    type=click.Choice(
+        ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
+        case_sensitive=False,
+    ),
     default=_CELERY_LOG_LEVEL_DEFAULT,
     show_default=True,
     help="Celery log level.",

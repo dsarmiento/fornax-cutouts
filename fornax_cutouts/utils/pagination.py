@@ -17,20 +17,17 @@ def get_pagination_metadata(
         "limit": limit,
         "totalItems": total_items,
         "totalPages": total_pages,
-        "currentPage": page + 1
+        "currentPage": page + 1,
     }
 
     links = {
         "self": f"{base_url}?page={page}&limit={limit}",
         "first": f"{base_url}?page=0&limit={limit}",
-        "last": f"{base_url}?page={total_pages - 1}&limit={limit}"
+        "last": f"{base_url}?page={total_pages - 1}&limit={limit}",
     }
     if page > 0:
         links["prev"] = f"{base_url}?page={page - 1}&limit={limit}"
     if page < total_pages - 1:
         links["next"] = f"{base_url}?page={page + 1}&limit={limit}"
 
-    return {
-        "metadata": metadata,
-        "links": links
-    }
+    return {"metadata": metadata, "links": links}

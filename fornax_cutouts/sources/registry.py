@@ -4,7 +4,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import Positions
-from fornax_cutouts.models.cutouts import FilenameLookupResponse, FilenameWithMetadata
+from fornax_cutouts.models.cutouts import FilenameLookupResponse
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
 
 
