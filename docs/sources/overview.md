@@ -19,7 +19,7 @@ from fornax_cutouts.sources import cutout_registry
 
 ### Discovery
 
-At startup, the API and each worker call `discover_sources()`. This method globs all `*.py` files under `CUTOUTS__SOURCE_PATH` and executes each one. Any file that uses the `@cutout_registry.register_source(...)` decorator will register its source class automatically.
+At startup, the API and each worker call `discover_sources()`. This method globs all `*.py` files under `CUTOUTS__SOURCE_PATH` and executes each one. Any file that uses the `@cutout_registry.register_source()` decorator will register its source class automatically.
 
 ```mermaid
 flowchart TD
@@ -37,7 +37,7 @@ No imports or explicit registration calls are needed in your application code â€
 
 | Method                                                                   | Description                                                                                                          |
 | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `register_source(mission)`                                               | Decorator that registers a source class under the given mission key.                                                 |
+| `register_source()`                                                      | Decorator that registers a source class under the given mission name.                                                |
 | `discover_sources()`                                                     | Scans `CUTOUTS__SOURCE_PATH` and executes all `.py` files. Called at startup.                                        |
 | `get_source_names()`                                                     | Returns a sorted list of all registered mission keys.                                                                |
 | `get_mission(mission)`                                                   | Returns the `AbstractMissionSource` instance for a given key. Raises `ValueError` if not found.                      |

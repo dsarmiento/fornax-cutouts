@@ -13,12 +13,11 @@ Settings can be provided as environment variables or in a `.env` file in the wor
 
 ## Core Settings
 
-| Environment Variable   | Type     | Default   | Required | Description                                                                                                                          |
-| ---------------------- | -------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `CUTOUTS__SOURCE_PATH` | `path`   | —         | **Yes**  | Path to the directory containing mission source `.py` files. All `.py` files under this path are discovered and executed at startup. |
-| `CUTOUTS__LOG_LEVEL`   | `string` | `info`    | No       | Log level for the API and worker. Accepted values: `critical`, `error`, `warning`, `info`, `debug`.                                  |
-| `CUTOUTS__SYNC_TTL`    | `int`    | `3600`    | No       | Time-to-live in seconds for presigned S3 URLs returned by sync cutout endpoints. Default is 1 hour.                                  |
-| `CUTOUTS__ASYNC_TTL`   | `int`    | `1209600` | No       | Time-to-live in seconds for async job results stored in Redis. Default is 2 weeks.                                                   |
+| Environment Variable   | Type     | Default | Required | Description                                                                                                                          |
+| ---------------------- | -------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `CUTOUTS__SOURCE_PATH` | `path`   | —       | **Yes**  | Path to the directory containing mission source `.py` files. All `.py` files under this path are discovered and executed at startup. |
+| `CUTOUTS__LOG_LEVEL`   | `string` | `info`  | No       | Log level for the API and worker. Accepted values: `critical`, `error`, `warning`, `info`, `debug`.                                  |
+| `CUTOUTS__SYNC_TTL`    | `int`    | `3600`  | No       | Time-to-live in seconds for presigned S3 URLs returned by sync cutout endpoints. Default is 1 hour.                                  |
 
 ---
 
@@ -59,7 +58,7 @@ Nested under `CUTOUTS__STORAGE__`.
 | `CUTOUTS__STORAGE__PREFIX` | `string` | `/tmp`  | Root path for storing cutout output files. Use a local path for development or an `s3://bucket/prefix` URI for production. |
 
 :::{tip} S3 Storage
-When `CUTOUTS__STORAGE__PREFIX` starts with `s3://`, the service uses [fsspec](https://filesystem-spec.readthedocs.io/) for all file I/O. Ensure the process has the necessary IAM permissions to write to the target bucket.
+When `CUTOUTS__STORAGE__PREFIX` starts with `s3://`, the service uses [s3fs](https://filesystem-spec.readthedocs.io/) for all file I/O. Ensure the process has the necessary IAM permissions to write to the target bucket.
 :::
 
 ---
@@ -70,8 +69,6 @@ These variables are read directly from the environment (no `CUTOUTS__` prefix) a
 
 | Environment Variable | Default     | Description                                                                                                                                                                                            |
 | -------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ENVIRONMENT_NAME`   | `dev`       | Deployment environment name. When set to `ops`, the `environment` field is omitted from health check responses. When set to `dev`, the `/api/dev/flushdb` endpoint is available.                       |
-| `DEPLOYMENT_TYPE`    | `local`     | Deployment context identifier. Used for logging and observability.                                                                                                                                     |
 | `AWS_S3_REGION`      | `us-east-1` | AWS region used for DuckDB S3 access when querying Parquet files stored in S3.                                                                                                                         |
 | `S3FS_BLOCK_SIZE`    | —           | Optional. S3 block size in MiB for astrocut file reads. When set, overrides the default fsspec block size via a monkey-patch applied at worker startup. Useful for tuning large FITS file performance. |
 
@@ -104,7 +101,7 @@ CUTOUTS__ASYNC_TTL=1209600
 CUTOUTS__LOG_LEVEL=info
 
 # Deployment
-ENVIRONMENT_NAME=prod
+CUTOUTS__DEPLOYMENT_ENVIRONMENT=prod
 AWS_S3_REGION=us-east-1
 ```
 

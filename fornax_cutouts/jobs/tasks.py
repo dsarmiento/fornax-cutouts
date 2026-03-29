@@ -78,7 +78,6 @@ def schedule_job(
                     "size": target_fname.size or size,
                     "output_format": output_format,
                     "output_dir": f"{CONFIG.storage.prefix}/cutouts/async/{job_id}/{target_fname.mission}",
-                    "ttl": CONFIG.async_ttl,
                     "mission": target_fname.mission,
                     "metadata": filename_obj.metadata,
                 }

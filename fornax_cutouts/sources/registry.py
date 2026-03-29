@@ -16,9 +16,10 @@ class CutoutRegistry:
     def _VALID_SOURCES(self) -> list[str]:
         return sorted(self._SOURCES.keys())
 
-    def register_source(self, mission: str):
+    def register_source(self):
         def _decorator(cls: AbstractMissionSource) -> AbstractMissionSource:
-            self._SOURCES[mission] = cls()
+            mission_name = cls.metadata.name
+            self._SOURCES[mission_name] = cls()
             return cls
 
         return _decorator

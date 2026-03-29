@@ -66,16 +66,3 @@ async def health_check(redis_client: Annotated[Redis | RedisCluster, Depends(asy
         health_response["environment"] = CONFIG.deployment_environment
 
     return health_response
-
-
-if CONFIG.deployment_environment == "dev":
-
-    @main_app.get(
-        "/api/dev/flushdb",
-        tags=["Development"],
-        summary="Flush the Redisdatabase",
-        description="Flushes all keys from Redis. Only available when in the development environment.",
-    )
-    async def flush_db(redis_client: Annotated[Redis | RedisCluster, Depends(async_redis_client_factory)]):
-        await redis_client.flushdb()
-        return {"message": "Database flushed"}

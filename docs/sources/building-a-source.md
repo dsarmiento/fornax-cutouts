@@ -116,8 +116,7 @@ MissionMetadata(
     filter=["g", "r", "i"],
     survey=["wide"],
     # Mission-specific extras
-    wavelength_range="400-900nm",
-    coverage_area="full sky",
+    stack_files=["data", "wt", "mask"]
 )
 ```
 
@@ -138,7 +137,7 @@ from fornax_cutouts.models.base import Positions, TargetPosition
 from fornax_cutouts.models.cutouts import FilenameLookupResponse, FilenameWithMetadata
 
 
-@cutout_registry.register_source("my_mission")
+@cutout_registry.register_source()
 class MyMissionSource(AbstractMissionSource):
     metadata = MissionMetadata(
         name="my_mission",

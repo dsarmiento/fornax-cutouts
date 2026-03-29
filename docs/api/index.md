@@ -66,7 +66,7 @@ Sync endpoints execute cutouts inline and return results immediately. Suitable f
 | Parameter         | Type     | Required | Description                                             |
 | ----------------- | -------- | -------- | ------------------------------------------------------- |
 | `filename`        | `string` | Yes      | Source FITS file path or S3 URI.                        |
-| `ra`              | `float`  | Yes      | Right ascension in decimal degrees (0–360).             |
+| `ra`              | `float`  | Yes      | Right ascension in decimal degrees (0 to 360).          |
 | `dec`             | `float`  | Yes      | Declination in decimal degrees (−90 to 90).             |
 | `size`            | `int`    | Yes      | Cutout size in pixels.                                  |
 | `include_preview` | `bool`   | No       | Also generate a JPEG preview alongside the FITS cutout. |
@@ -110,40 +110,30 @@ Jobs are submitted as `multipart/form-data`. Mission-specific parameters are pas
 
 **Required fields:**
 
-| Field        | Type       | Description                                                                         |
-| ------------ | ---------- | ----------------------------------------------------------------------------------- |
-| `position[]` | `string[]` | One or more sky positions as `"ra,dec"` decimal strings or resolvable object names. |
-| `size`       | `int`      | Cutout size in pixels.                                                              |
+| Field      | Type       | Description                                                                         |
+| ---------- | ---------- | ----------------------------------------------------------------------------------- |
+| `position` | `string[]` | One or more sky positions as `"ra,dec"` decimal strings or resolvable object names. |
+| `size`     | `int`      | Cutout size in pixels.                                                              |
 
 **Optional fields:**
 
-| Field               | Type          | Description                                                                     |
-| ------------------- | ------------- | ------------------------------------------------------------------------------- |
-| `output_format[]`   | `string[]`    | Output formats: `fits` (default), `jpeg`.                                       |
-| `RUNID`             | `string`      | Client-provided run identifier (max 64 chars).                                  |
-| `{mission}.{param}` | `string`      | Mission-specific parameter (e.g. `ps1.filter=r`).                               |
-| `{mission}`         | `JSON string` | All mission params as a JSON object (e.g. `ps1={"filter":"r","survey":"3pi"}`). |
+| Field               | Type          | Description                                                                                   |
+| ------------------- | ------------- | --------------------------------------------------------------------------------------------- |
+| `output_format`     | `string[]`    | Output formats: `fits` (default), `jpeg`.                                                     |
+| `RUNID`             | `string`      | Client-provided run identifier (max 64 chars).                                                |
+| `{mission}.{param}` | `string`      | Mission-specific parameter (e.g. `{mission}.filter=r`).                                       |
+| `{mission}`         | `JSON string` | All mission params as a JSON object (e.g. `{mission}={"filter":"r", "survey": "my_survey"}`). |
 
 **Example using curl:**
 
 ```bash
-curl -X POST http://cutouts.mast.stsci.edu/api/v0/cutouts/async \
-  -F "position[]=189.997633,-11.623054" \
-  -F "position[]=241.516310,55.425480" \
+curl -X POST http://localhost:8000/api/v0/cutouts/async \
+  -F "position=189.997633,-11.623054" \
+  -F "position=241.516310,55.425480" \
   -F "size=256" \
-  -F "output_format[]=fits" \
-  -F "ps1.filter=r" \
-  -F "ps1.survey=3pi"
+  -F "output_format=fits" \
+  -F "my_mission.filter=r" \
+  -F "my_mission.survey=my_survey"
 ```
 
 The response redirects (`303`) to `/api/v0/cutouts/async/{job_id}`.
-
----
-
-## Development-Only Endpoints
-
-These endpoints are only available when `ENVIRONMENT_NAME=dev`:
-
-| Method | Path               | Description                                                   |
-| ------ | ------------------ | ------------------------------------------------------------- |
-| `GET`  | `/api/dev/flushdb` | Flush all Redis keys. **Destructive — development use only.** |

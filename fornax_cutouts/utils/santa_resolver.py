@@ -2,10 +2,10 @@ from dataclasses import dataclass
 
 import httpx
 
-from fornax_cutouts.constants import ENVIRONMENT_NAME
+from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import Positions, TargetPosition
 
-ENVIRONMENT_PREFIX = ENVIRONMENT_NAME if ENVIRONMENT_NAME not in ["int", "ops"] else ""
+ENVIRONMENT_PREFIX = CONFIG.deployment_environment if CONFIG.deployment_environment not in ["int", "ops"] else ""
 SANTA_QUERY_URI = f"https://{ENVIRONMENT_PREFIX}mastresolver.stsci.edu/Santa-war"
 
 
