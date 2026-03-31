@@ -67,7 +67,7 @@ class MetadataHandler:
                 include_metadata=True,
             )
 
-            mission_total_files = len(mission_filenames)
+            mission_total_files = sum(len(fname_response.filenames) for fname_response in mission_filenames)
             total_files += mission_total_files
 
             mission_result[mission_name] = {
@@ -108,6 +108,6 @@ class MetadataHandler:
 
         return {
             "request": fname_request,
-            "total_files": len(fnames),
+            "total_files": sum(len(fname_response.filenames) for fname_response in fnames),
             "filenames": fnames,
         }
