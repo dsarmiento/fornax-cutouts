@@ -21,20 +21,24 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
         request.state.correlation_id = correlation_id
 
+        client_ip = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+
         logger = logging.getLogger(CONFIG.log.name)
         request_data = {
             "event": "request_started",
             "method": request.method,
             "path": request.url.path,
-            "client_ip": request.client.host if request.client else None,
-            "user_agent": request.headers.get("user-agent"),
+            "client_ip": client_ip,
+            "user_agent": user_agent,
             "correlation_id": correlation_id,
         }
-        logger.debug("HTTP request started", extra=request_data)
+        log_line = f"{request.method} {request.url.path} ({client_ip})"
+        logger.debug(log_line, extra=request_data)
 
         try:
             response: Response = await call_next(request)
-            response_time = time.time() - start_time
+            response_time_ms = round((time.time() - start_time) * 1000, 2)
 
             response.headers["X-Correlation-ID"] = correlation_id
             response_data = {
@@ -42,26 +46,28 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "method": request.method,
                 "path": request.url.path,
                 "status_code": response.status_code,
-                "response_time_ms": round(response_time * 1000, 2),
-                "client_ip": request.client.host if request.client else None,
-                "user_agent": request.headers.get("user-agent"),
+                "response_time_ms": response_time_ms,
+                "client_ip": client_ip,
+                "user_agent": user_agent,
                 "correlation_id": correlation_id,
             }
-            logger.info("HTTP request completed", extra=response_data)
+            log_line = f"{response.status_code} {request.method} {request.url.path} ({client_ip}) {response_time_ms}ms"
+            logger.info(log_line, extra=response_data)
 
             return response
 
         except Exception as exc:
-            response_time = time.time() - start_time
+            response_time_ms = round((time.time() - start_time) * 1000, 2)
             error_data = {
                 "event": "request_failed",
                 "method": request.method,
                 "path": request.url.path,
-                "response_time_ms": round(response_time * 1000, 2),
-                "client_ip": request.client.host if request.client else None,
+                "response_time_ms": response_time_ms,
+                "client_ip": client_ip,
                 "correlation_id": correlation_id,
                 "error": str(exc),
                 "error_type": type(exc).__name__,
             }
-            logger.error("HTTP request failed", extra=error_data, exc_info=True)
+            log_line = f"{request.method} {request.url.path} ({client_ip}) {response_time_ms}ms"
+            logger.error(log_line, extra=error_data, exc_info=True)
             raise
