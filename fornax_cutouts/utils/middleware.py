@@ -30,7 +30,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             "user_agent": request.headers.get("user-agent"),
             "correlation_id": correlation_id,
         }
-        logger.info("HTTP request started", extra=request_data)
+        logger.debug("HTTP request started", extra=request_data)
 
         try:
             response: Response = await call_next(request)
@@ -44,6 +44,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "status_code": response.status_code,
                 "response_time_ms": round(response_time * 1000, 2),
                 "client_ip": request.client.host if request.client else None,
+                "user_agent": request.headers.get("user-agent"),
                 "correlation_id": correlation_id,
             }
             logger.info("HTTP request completed", extra=response_data)
