@@ -1,15 +1,25 @@
 import json
+import re
 import time
 import uuid
 from typing import Any
 from urllib.parse import parse_qs
 
+from starlette import status
 from starlette.datastructures import UploadFile
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
 from fornax_cutouts.utils.logging import get_logger
+
+# UWS async routes: /api/v#/cutouts/async/{job_id}/...
+_ASYNC_JOB_ID_PATH = re.compile(r"^/api/v\d+/cutouts/async/([^/]+)")
+
+
+def job_id_from_request_path(path: str) -> str | None:
+    m = _ASYNC_JOB_ID_PATH.match(path)
+    return m.group(1) if m else None
 
 
 def client_ip_from_request(request: Request) -> str | None:
@@ -99,6 +109,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         """Process request and log details."""
         start_time = time.time()
+
+        job_id = job_id_from_request_path(request.url.path)
         correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
         request.state.correlation_id = correlation_id
 
@@ -107,8 +119,9 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         logger = get_logger()
         request_data = {
             "event": "request_started",
-            "request": request_block,
             "correlation_id": correlation_id,
+            "job_id": job_id,
+            "request": request_block,
         }
         log_line = f"{request.method} {request.url.path} ({request_block['client_ip']})"
         logger.debug(log_line, extra=request_data)
@@ -121,14 +134,22 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "response_time_ms": response_time_ms,
             }
 
+            # Update job ID if redirecting to UWS job ID
+            if response.status_code == status.HTTP_303_SEE_OTHER:
+                job_id = job_id_from_request_path(response.headers.get("Location")) or job_id
+
             response.headers["X-Correlation-ID"] = correlation_id
             response_data = {
                 "event": "request_completed",
+                "correlation_id": correlation_id,
+                "job_id": job_id,
                 "request": request_block,
                 "response": response_block,
-                "correlation_id": correlation_id,
             }
-            log_line = f"{response.status_code} {request.method} {request.url.path} ({request_block['client_ip']}) {response_time_ms}ms"
+            log_line = (
+                f"{response.status_code} {request.method} {request.url.path} "
+                f"({request_block['client_ip']}) {response_time_ms}ms"
+            )
             logger.info(log_line, extra=response_data)
 
             return response
@@ -137,9 +158,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             response_time_ms = round((time.time() - start_time) * 1000, 2)
             error_data = {
                 "event": "request_failed",
+                "correlation_id": correlation_id,
+                "job_id": job_id,
                 "request": request_block,
                 "response_time_ms": response_time_ms,
-                "correlation_id": correlation_id,
                 "error": str(exc),
                 "error_type": type(exc).__name__,
             }
