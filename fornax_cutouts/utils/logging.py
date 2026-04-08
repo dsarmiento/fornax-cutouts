@@ -7,8 +7,12 @@ from typing import Any, Literal
 from fornax_cutouts.config import CONFIG
 
 
-class StructuredJSONFormatter(logging.Formatter):
+def get_logger() -> logging.Logger:
+    """Get the logger for the fornax cutouts service."""
+    return logging.getLogger(CONFIG.log.name)
 
+
+class StructuredJSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
         log_data: dict[str, Any] = {
@@ -63,7 +67,7 @@ def setup_structured_logging(service: Literal["api", "worker"]):
     log_level = CONFIG.log.level.upper()
     log_format = CONFIG.log.format.upper()
 
-    logger = logging.getLogger(CONFIG.log.name)
+    logger = get_logger()
     logger.handlers.clear()
     logger.setLevel(log_level)
     logger.propagate = False

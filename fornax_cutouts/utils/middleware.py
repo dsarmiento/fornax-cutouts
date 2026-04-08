@@ -1,4 +1,3 @@
-import logging
 import time
 import uuid
 
@@ -6,7 +5,22 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from fornax_cutouts.config import CONFIG
+from fornax_cutouts.utils.logging import get_logger
+
+
+def client_ip_from_request(request: Request) -> str | None:
+    """Best-effort original client IP (e.g. behind ALB); falls back to the TCP peer."""
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        first = forwarded_for.split(",")[0].strip()
+        if first:
+            return first
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        stripped = real_ip.strip()
+        if stripped:
+            return stripped
+    return request.client.host if request.client else None
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -21,10 +35,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
         request.state.correlation_id = correlation_id
 
-        client_ip = request.client.host if request.client else None
+        client_ip = client_ip_from_request(request)
         user_agent = request.headers.get("user-agent")
 
-        logger = logging.getLogger(CONFIG.log.name)
+        logger = get_logger()
         request_data = {
             "event": "request_started",
             "method": request.method,

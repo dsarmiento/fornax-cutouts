@@ -3,7 +3,6 @@ import logging
 import uuid
 from collections import defaultdict
 from enum import StrEnum
-from functools import partial
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
@@ -16,12 +15,12 @@ from vo_models.uws.types import ExecutionPhase
 from vo_models.voresource.types import UTCTimestamp
 from vo_models.xlink import XlinkType
 
-from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, async_redis_client_factory
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.html_link import html_link
+from fornax_cutouts.utils.logging import get_logger
 
 uws_router = APIRouter(prefix="/cutouts", tags=["Async Cutouts (UWS)"])
 
@@ -51,7 +50,7 @@ class CsvResponse(Response):
 @cbv(uws_router)
 class CutoutsUWSHandler:
     redis_client: Redis | RedisCluster = Depends(async_redis_client_factory)
-    logger: logging.Logger = Depends(partial(logging.getLogger, CONFIG.log.name))
+    logger: logging.Logger = Depends(get_logger)
 
     @uws_router.get(
         "/async",
