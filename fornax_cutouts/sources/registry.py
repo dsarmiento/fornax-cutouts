@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, field
 from functools import cached_property
 from importlib.util import module_from_spec, spec_from_file_location
@@ -6,11 +7,13 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import Positions
 from fornax_cutouts.models.cutouts import FilenameLookupResponse
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
+from fornax_cutouts.utils.logging import get_logger
 
 
 @dataclass
 class CutoutRegistry:
     _SOURCES: dict[str, AbstractMissionSource] = field(default_factory=dict, init=False)
+    logger: logging.Logger = field(default_factory=get_logger, init=False)
 
     @cached_property
     def _VALID_SOURCES(self) -> list[str]:
@@ -30,7 +33,7 @@ class CutoutRegistry:
             module = module_from_spec(spec)
             spec.loader.exec_module(module)
 
-        print(f"Registered sources: {self.get_source_names()}")
+        self.logger.info(f"Registered sources: {self.get_source_names()}")
 
     def get_source_names(self) -> list[str]:
         return self._VALID_SOURCES

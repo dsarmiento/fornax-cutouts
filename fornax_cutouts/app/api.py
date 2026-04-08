@@ -11,13 +11,13 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import async_redis_client_factory, setup_index, sync_redis_client_factory
 from fornax_cutouts.routes.v1 import api_v1
 from fornax_cutouts.sources import cutout_registry
-from fornax_cutouts.utils.logging import get_logger, setup_structured_logging
+from fornax_cutouts.utils.logging import get_logger, setup_api_logging
 from fornax_cutouts.utils.middleware import RequestLoggingMiddleware
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    setup_structured_logging(service="api")
+    setup_api_logging()
     logger = get_logger()
     logger.info("Application startup initiated", extra={"event": "startup"})
     cutout_registry.discover_sources()

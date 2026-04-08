@@ -1,19 +1,16 @@
-import logging
 import os
 import ssl
-import sys
 
 from celery import Celery
-from celery.signals import worker_process_init, worker_process_shutdown
-from celery.utils.log import get_task_logger
+from celery.signals import setup_logging, worker_process_init, worker_process_shutdown
 from redis import Redis, RedisCluster
 
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import sync_redis_client_factory
 from fornax_cutouts.sources import cutout_registry
-from fornax_cutouts.utils.logging import StructuredJSONFormatter
+from fornax_cutouts.utils.logging import get_logger, setup_worker_logging
 
-logger = get_task_logger("cutouts")
+logger = get_logger()
 
 redis_client: Redis | RedisCluster | None = None
 
@@ -55,56 +52,33 @@ if CONFIG.redis.use_ssl:
 
 celery_app.conf.update(**conf_update)
 
-# Configure structured logging for Celery loggers
-if CONFIG.log.format == "json":
-    # Disable Celery's default logging setup to prevent interference
-    celery_app.conf.update(
-        worker_hijack_root_logger=False,
-        worker_log_format="",
-        worker_task_log_format="",
-    )
-    # Configure Celery loggers to use JSON formatter
-    log_level = CONFIG.log.level.upper()
 
-    # Create console handler with JSON formatter
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(StructuredJSONFormatter())
+@setup_logging.connect
+def configure_logging(**kwargs):
+    """Configure logging before Celery starts its worker pool.
 
-    # Configure Celery loggers
-    for logger_name in ["celery", "celery.task", "celery.worker"]:
-        celery_logger = logging.getLogger(logger_name)
-        celery_logger.setLevel(log_level)
-        celery_logger.handlers.clear()
-        celery_logger.addHandler(console_handler)
-        celery_logger.propagate = False
-
-    # Configure the cutouts task logger
-    cutouts_logger = logging.getLogger("cutouts")
-    cutouts_logger.setLevel(log_level)
-    cutouts_logger.handlers.clear()
-    cutouts_logger.addHandler(console_handler)
-    cutouts_logger.propagate = False
+    Connecting to this signal causes Celery to skip its own logging setup
+    entirely. Runs in the main process before workers are forked, so all
+    worker processes inherit the configured loggers.
+    """
+    setup_worker_logging()
 
 
 @worker_process_init.connect
 def setup_worker_process(**kwargs):
-    logging.getLogger("astrocut").setLevel(logging.ERROR)
-    logging.getLogger("astropy").setLevel(logging.ERROR)
-
     cutout_registry.discover_sources()
 
     redis_client_factory()
-    logger.info("Redis client setup complete")
+    logger.debug("Redis client setup complete")
 
     _monkey_patch_astrocut()
-    logger.info("Astrocut monkey patch complete")
+    logger.debug("Astrocut monkey patch complete")
 
 
 @worker_process_shutdown.connect
 def teardown_worker_process(**kwargs):
     redis_client_factory().close()
-    logger.info("Redis client teardown complete")
+    logger.debug("Redis client teardown complete")
 
 
 def _monkey_patch_astrocut():
