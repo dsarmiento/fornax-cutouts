@@ -417,6 +417,22 @@ def generate_cutout(
 
     end_time = time.perf_counter()
 
+    size_bytes = {}
+    timings_s = {
+        "init": round(init_time - start_time, 4),
+        "astrocut_init": round(astrocut_init_time - astrocut_init_start, 4),
+        "upload": round(upload_time - jpg_write_time, 4),
+        "total": round(end_time - start_time, 4),
+    }
+
+    if fits_fname:
+        size_bytes["fits"] = fits_size_bytes
+        timings_s["fits_write"] = round(fits_write_time - astrocut_init_time, 4)
+
+    if img_fname:
+        size_bytes["jpeg"] = jpg_size_bytes
+        timings_s["jpeg_write"] = round(jpg_write_time - fits_write_time, 4)
+
     logger.info(
         f"Cutout generated: job {job_id} - mission='{mission}' source='{source_file}' size={size[0]}x{size[1]}px",
         extra={
@@ -426,16 +442,8 @@ def generate_cutout(
             "source_file": source_file,
             "target": target,
             "size_px": size,
-            "fits_size_bytes": fits_size_bytes,
-            "jpg_size_bytes": jpg_size_bytes,
-            "timings_s": {
-                "init": round(init_time - start_time, 4),
-                "astrocut_init": round(astrocut_init_time - astrocut_init_start, 4),
-                "fits_write": round(fits_write_time - astrocut_init_time, 4) if fits_fname else None,
-                "jpg_write": round(jpg_write_time - fits_write_time, 4) if img_fname else None,
-                "upload": round(upload_time - jpg_write_time, 4),
-                "total": round(end_time - start_time, 4),
-            },
+            "timings_s": timings_s,
+            "size_bytes": size_bytes,
         },
     )
 
@@ -511,11 +519,11 @@ def generate_color_preview(
             "event": "color_preview_generated",
             "target": target,
             "size_px": size,
-            "jpg_size_bytes": jpg_size_bytes,
+            "size_bytes": {"jpeg": jpg_size_bytes},
             "source_files": {"red": red, "green": green, "blue": blue},
             "timings_s": {
                 "astrocut_init": round(astrocut_time - start_time, 4),
-                "jpg_write": round(write_time - astrocut_time, 4),
+                "jpeg_write": round(write_time - astrocut_time, 4),
                 "upload": round(upload_time - write_time, 4),
                 "total": round(upload_time - start_time, 4),
             },
