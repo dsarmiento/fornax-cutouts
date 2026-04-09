@@ -1,7 +1,9 @@
 import json
+import logging
 import uuid
+from collections import defaultdict
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Path, Query, Request, Response, status
@@ -18,6 +20,7 @@ from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.html_link import html_link
+from fornax_cutouts.utils.logging import get_logger
 
 uws_router = APIRouter(prefix="/cutouts", tags=["Async Cutouts (UWS)"])
 
@@ -47,6 +50,7 @@ class CsvResponse(Response):
 @cbv(uws_router)
 class CutoutsUWSHandler:
     redis_client: Redis | RedisCluster = Depends(async_redis_client_factory)
+    logger: logging.Logger = Depends(get_logger)
 
     @uws_router.get(
         "/async",
@@ -106,29 +110,28 @@ class CutoutsUWSHandler:
     ):
         form = await request.form()
 
-        mission_params = {}
+        mission_params: dict[str, dict[str, Any]] = defaultdict(dict)
         source_names = cutout_registry.get_source_names()
 
         for key, value in form.multi_items():
             # Case 1: key is a source name with JSON string value
             if key in source_names:
-                mission_params[key] = json.loads(value)
+                mission_params[key].update(json.loads(value))
             # Case 2: key is in format "source_name.parameter"
             elif "." in key:
                 parts = key.split(".", 1)  # Split only on first dot
                 source_name = parts[0]
                 param_name = parts[1]
 
-                if source_name in source_names:
-                    if source_name not in mission_params:
-                        mission_params[source_name] = {}
+                if source_name not in source_names:
+                    continue
 
-                    if param_name not in mission_params[source_name]:
-                        mission_params[source_name][param_name] = value
-                    elif not isinstance(mission_params[source_name][param_name], list):
-                        mission_params[source_name][param_name] = [mission_params[source_name][param_name], value]
-                    else:
-                        mission_params[source_name][param_name].append(value)
+                if param_name not in mission_params[source_name]:
+                    mission_params[source_name][param_name] = value
+                elif not isinstance(mission_params[source_name][param_name], list):
+                    mission_params[source_name][param_name] = [mission_params[source_name][param_name], value]
+                else:
+                    mission_params[source_name][param_name].append(value)
 
         request_params = {
             "position": position,
@@ -140,6 +143,16 @@ class CutoutsUWSHandler:
         job_id = uuid.uuid4().hex[:8]
         uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
 
+        self.logger.info(
+            "Creating UWS job",
+            extra={
+                "event": "job_creation_started",
+                "job_id": job_id,
+                "run_id": run_id,
+                "parameters": request_params,
+                "correlation_id": getattr(request.state, "correlation_id", None),
+            },
+        )
         await uws_job.create_job(
             run_id=run_id,
             parameters=request_params,

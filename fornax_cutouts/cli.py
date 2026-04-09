@@ -2,8 +2,7 @@ import click
 
 from fornax_cutouts.config import CONFIG
 
-# Normalize defaults from CONFIG.log_level
-_DEFAULT_LOG_LEVEL = getattr(CONFIG, "log_level", "INFO")
+_DEFAULT_LOG_LEVEL = CONFIG.log.level
 _UVICORN_LOG_LEVEL_DEFAULT = str(_DEFAULT_LOG_LEVEL).lower()
 _CELERY_LOG_LEVEL_DEFAULT = str(_DEFAULT_LOG_LEVEL).upper()
 
@@ -66,6 +65,10 @@ def api(
     import uvicorn
 
     from fornax_cutouts.app.api import main_app
+    from fornax_cutouts.config import CONFIG
+
+    # Disable uvicorn access log when using JSON format (handled by middleware)
+    access_log = CONFIG.log.format != "json"
 
     uvicorn.run(
         main_app,
@@ -74,6 +77,7 @@ def api(
         reload=reload,
         workers=workers,
         log_level=log_level,
+        access_log=access_log,
     )
 
 

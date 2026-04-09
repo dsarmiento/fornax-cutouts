@@ -1,9 +1,11 @@
+import logging
 from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
 
 from fornax_cutouts.models.base import Positions, TargetPosition
 from fornax_cutouts.models.cutouts import FilenameLookupResponse
+from fornax_cutouts.utils.logging import get_logger
 
 
 class MissionMetadata(BaseModel):
@@ -19,6 +21,10 @@ class MissionMetadata(BaseModel):
 
 class AbstractMissionSource(ABC):
     metadata: MissionMetadata
+
+    @property
+    def logger(self) -> logging.Logger:
+        return get_logger()
 
     def __repr__(self):
         return f"MissionSource(mission={self.metadata.name})"

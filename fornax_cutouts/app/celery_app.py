@@ -1,17 +1,16 @@
-import logging
 import os
 import ssl
 
 from celery import Celery
-from celery.signals import worker_process_init, worker_process_shutdown
-from celery.utils.log import get_task_logger
+from celery.signals import setup_logging, worker_process_init, worker_process_shutdown
 from redis import Redis, RedisCluster
 
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import sync_redis_client_factory
 from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.utils.logging import get_logger, setup_worker_logging
 
-logger = get_task_logger("cutouts")
+logger = get_logger()
 
 redis_client: Redis | RedisCluster | None = None
 
@@ -54,24 +53,32 @@ if CONFIG.redis.use_ssl:
 celery_app.conf.update(**conf_update)
 
 
+@setup_logging.connect
+def configure_logging(**kwargs):
+    """Configure logging before Celery starts its worker pool.
+
+    Connecting to this signal causes Celery to skip its own logging setup
+    entirely. Runs in the main process before workers are forked, so all
+    worker processes inherit the configured loggers.
+    """
+    setup_worker_logging()
+
+
 @worker_process_init.connect
 def setup_worker_process(**kwargs):
-    logging.getLogger("astrocut").setLevel(logging.ERROR)
-    logging.getLogger("astropy").setLevel(logging.ERROR)
-
     cutout_registry.discover_sources()
 
     redis_client_factory()
-    logger.info("Redis client setup complete")
+    logger.debug("Redis client setup complete")
 
     _monkey_patch_astrocut()
-    logger.info("Astrocut monkey patch complete")
+    logger.debug("Astrocut monkey patch complete")
 
 
 @worker_process_shutdown.connect
 def teardown_worker_process(**kwargs):
     redis_client_factory().close()
-    logger.info("Redis client teardown complete")
+    logger.debug("Redis client teardown complete")
 
 
 def _monkey_patch_astrocut():
