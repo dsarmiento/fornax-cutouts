@@ -72,7 +72,6 @@ def schedule_job(
 
     total_jobs = 0
     mission_cutout_counts: defaultdict[str, int] = defaultdict(int)
-    source_file_usage: defaultdict[str, int] = defaultdict(int)
 
     for positions in r.scan_job_positions():
         resolved_positions = resolve_positions(positions)
@@ -99,7 +98,6 @@ def schedule_job(
                 }
                 descriptors.append(descriptor)
                 mission_cutout_counts[target_fname.mission] += 1
-                source_file_usage[filename_obj.filename] += 1
 
         num_jobs = len(descriptors)
 
@@ -138,8 +136,14 @@ def schedule_job(
             "job_id": job_id,
             "total_cutouts": total_jobs,
             "cutouts_per_mission": mission_cutout_counts,
-            "unique_source_files": len(source_file_usage),
-            "source_file_usage": source_file_usage,
+            "total_s": round(batch_cutouts_task_time - start_time, 4),
+        },
+    )
+    logger.debug(
+        f"Job {job_id} scheduled timings",
+        extra={
+            "event": "job_scheduled_timings",
+            "job_id": job_id,
             "timings_s": {
                 "redis_update": round(redis_update_time - start_time, 4),
                 "validate_mission_params": round(validate_mission_params_time - redis_update_time, 4),
@@ -217,6 +221,15 @@ def batch_cutouts(self: Task, job_id: str):
             "pool_size": pool_size,
             "batch_size": batch_size,
             "num_cutouts": len(descriptors),
+            "total_s": round(chord_time - start_time, 4),
+        },
+    )
+    logger.debug(
+        f"Job {job_id} batch {batch_num} timings",
+        extra={
+            "event": "batch_dispatched_timings",
+            "job_id": job_id,
+            "batch_num": batch_num,
             "timings_s": {
                 "batch_num": round(batch_num_time - start_time, 4),
                 "pop_pending_tasks": round(pop_pending_tasks_time - batch_num_time, 4),
@@ -305,6 +318,15 @@ def write_results(self: Task, results: list[CutoutResponse | dict | None], job_i
             "pending_tasks": pending_tasks,
             "expected_total": expected_total,
             "job_complete": job_complete,
+            "total_s": round(update_job_time - start_time, 4),
+        },
+    )
+    logger.debug(
+        f"Job {job_id} batch results timings",
+        extra={
+            "event": "batch_results_written_timings",
+            "job_id": job_id,
+            "batch_num": batch_num,
             "timings_s": {
                 "filter_results": round(filter_results_time - start_time, 4),
                 "write_results": round(write_results_time - filter_results_time, 4),
@@ -442,8 +464,17 @@ def generate_cutout(
             "source_file": source_file,
             "target": target,
             "size_px": size,
-            "timings_s": timings_s,
             "size_bytes": size_bytes,
+            "total_s": timings_s["total"],
+        },
+    )
+    logger.debug(
+        f"Cutout generated timings: job {job_id} - mission='{mission}'",
+        extra={
+            "event": "cutout_generated_timings",
+            "job_id": job_id,
+            "mission": mission,
+            "timings_s": timings_s,
         },
     )
 
@@ -521,6 +552,13 @@ def generate_color_preview(
             "size_px": size,
             "size_bytes": {"jpeg": jpg_size_bytes},
             "source_files": {"red": red, "green": green, "blue": blue},
+            "total_s": round(upload_time - start_time, 4),
+        },
+    )
+    logger.debug(
+        f"Color preview generated timings: size={size[0]}x{size[1]}px",
+        extra={
+            "event": "color_preview_generated_timings",
             "timings_s": {
                 "astrocut_init": round(astrocut_time - start_time, 4),
                 "jpeg_write": round(write_time - astrocut_time, 4),
