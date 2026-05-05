@@ -3,9 +3,7 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlencode
 
-from astrocut.exceptions import InvalidQueryError
-from celery.exceptions import TimeoutError as CeleryTimeoutError
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi_utils.cbv import cbv
 from fsspec import AbstractFileSystem, filesystem
@@ -16,44 +14,6 @@ from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
 
 sync_router = APIRouter(prefix="/cutouts", tags=["Sync Cutouts"])
-
-
-def _invalid_query_from_exc(exc: BaseException) -> InvalidQueryError | None:
-    seen: set[int] = set()
-    cur: BaseException | None = exc
-    while cur is not None and id(cur) not in seen:
-        seen.add(id(cur))
-        if isinstance(cur, InvalidQueryError):
-            return cur
-        cur = cur.__cause__
-    return None
-
-
-async def _await_cutout_result(async_result, *, timeout: float) -> CutoutResponse:
-    try:
-        out = await asyncio.to_thread(async_result.get, timeout=timeout)
-    except CeleryTimeoutError as e:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Cutout generation timed out",
-        ) from e
-    except Exception as e:
-        iq = _invalid_query_from_exc(e)
-        if iq is not None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(iq),
-            ) from e
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Cutout generation failed",
-        ) from e
-    if out is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Cutout generation returned no result",
-        )
-    return out
 
 
 @cbv(sync_router)
@@ -98,7 +58,6 @@ class CutoutsSyncHandler:
 
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
         task_uid = uuid.uuid4().hex[:12]
-        print(f"Executing single cutout task: job_id={job_id}, task_uid={task_uid}")
         async_result = execute_cutout.apply_async(
             kwargs={
                 "job_id": job_id,
@@ -112,11 +71,7 @@ class CutoutsSyncHandler:
             task_id=f"sync-single-{job_id}-{task_uid}",
             priority=0,
         )
-        ret = await _await_cutout_result(
-            async_result,
-            timeout=15,
-        )
-
+        ret = await asyncio.to_thread(async_result.get, timeout=15)
         ret = CutoutResponse.model_validate(ret)
 
         if CONFIG.storage.is_s3:
@@ -156,7 +111,6 @@ class CutoutsSyncHandler:
 
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
         task_uid = uuid.uuid4().hex[:12]
-        print(f"Executing color preview task: job_id={job_id}, task_uid={task_uid}")
         async_result = execute_color_preview.apply_async(
             kwargs={
                 "red": red,
@@ -169,10 +123,7 @@ class CutoutsSyncHandler:
             task_id=f"sync-color-{job_id}-{task_uid}",
             priority=0,
         )
-        ret = await _await_cutout_result(
-            async_result,
-            timeout=15,
-        )
+        ret = await asyncio.to_thread(async_result.get, timeout=15)
         ret = CutoutResponse.model_validate(ret)
 
         if CONFIG.storage.is_s3:
