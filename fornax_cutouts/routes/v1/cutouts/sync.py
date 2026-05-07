@@ -1,4 +1,5 @@
 import asyncio
+import time
 import uuid
 from typing import Annotated
 from urllib.parse import urlencode
@@ -14,6 +15,22 @@ from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
 
 sync_router = APIRouter(prefix="/cutouts", tags=["Sync Cutouts"])
+
+
+async def _wait_for_result(async_result, timeout: float = 15.0, poll_interval: float = 0.2):
+    """
+    Poll for a Celery task result by repeatedly calling ready() instead of using the
+    pubsub-based AsyncResult.get(). The pubsub get() holds a single socket open and is
+    not safe to call concurrently from asyncio.to_thread: concurrent threads share the
+    same pubsub connection and interleave RESP2 reads, producing InvalidResponse errors.
+    ready() uses the normal connection pool (one pooled GET per call) and is safe.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if await asyncio.to_thread(async_result.ready):
+            return await asyncio.to_thread(async_result.get, propagate=True)
+        await asyncio.sleep(poll_interval)
+    raise TimeoutError(f"Sync cutout task did not complete within {timeout}s")
 
 
 @cbv(sync_router)
@@ -71,7 +88,7 @@ class CutoutsSyncHandler:
             task_id=f"sync-single-{job_id}-{task_uid}",
             priority=0,
         )
-        ret = await asyncio.to_thread(async_result.get, timeout=15)
+        ret = await _wait_for_result(async_result, timeout=CONFIG.redis.timeout)
         ret = CutoutResponse.model_validate(ret)
 
         if CONFIG.storage.is_s3:
@@ -123,7 +140,7 @@ class CutoutsSyncHandler:
             task_id=f"sync-color-{job_id}-{task_uid}",
             priority=0,
         )
-        ret = await asyncio.to_thread(async_result.get, timeout=15)
+        ret = await _wait_for_result(async_result, timeout=CONFIG.redis.timeout)
         ret = CutoutResponse.model_validate(ret)
 
         if CONFIG.storage.is_s3:

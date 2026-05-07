@@ -33,7 +33,7 @@ class CutoutRegistry:
             module = module_from_spec(spec)
             spec.loader.exec_module(module)
 
-        self.logger.info(f"Registered sources: {self.get_source_names()}")
+        self.logger.debug(f"Registered sources: {self.get_source_names()}")
 
     def get_source_names(self) -> list[str]:
         return self._VALID_SOURCES

@@ -405,8 +405,8 @@ def generate_cutout(  # noqa: C901
 
     fits_fname = ""
     img_fname = ""
-    science_size_bytes = 0
-    preview_size_bytes = 0
+    science_bytes = 0
+    preview_bytes = 0
     science_out_format = ""
     preview_out_format = ""
 
@@ -439,13 +439,13 @@ def generate_cutout(  # noqa: C901
         jpg_write_time = time.perf_counter()
 
         if fits_fname:
-            science_size_bytes = Path(fits_fname).stat().st_size
+            science_bytes = Path(fits_fname).stat().st_size
             fits_dest_fname = fits_fname.replace(temp_output_dir, output_dir)
             fs.put(lpath=fits_fname, rpath=fits_dest_fname)
             fits_fname = fits_dest_fname
 
         if img_fname:
-            preview_size_bytes = Path(img_fname).stat().st_size
+            preview_bytes = Path(img_fname).stat().st_size
             img_dest_fname = img_fname.replace(temp_output_dir, output_dir)
             fs.put(lpath=img_fname, rpath=img_dest_fname)
             img_fname = img_dest_fname
@@ -454,7 +454,7 @@ def generate_cutout(  # noqa: C901
 
     end_time = time.perf_counter()
 
-    size_bytes = {}
+    bytes = {}
     output_formats = {}
     timings_s = {
         "init": round(init_time - start_time, 4),
@@ -465,13 +465,13 @@ def generate_cutout(  # noqa: C901
 
     if fits_fname:
         output_formats["science"] = science_out_format
-        size_bytes["fits"] = science_size_bytes
-        timings_s["fits_write"] = round(fits_write_time - astrocut_init_time, 4)
+        bytes["science"] = science_bytes
+        timings_s["science_write"] = round(fits_write_time - astrocut_init_time, 4)
 
     if img_fname:
         output_formats["preview"] = preview_out_format
-        size_bytes["jpeg"] = preview_size_bytes
-        timings_s["jpeg_write"] = round(jpg_write_time - fits_write_time, 4)
+        bytes["preview"] = preview_bytes
+        timings_s["preview_write"] = round(jpg_write_time - fits_write_time, 4)
 
     logger.info(
         f"Cutout generated: job {job_id} - mission='{mission}' source='{source_file}' size={size[0]}x{size[1]}px",
@@ -480,10 +480,16 @@ def generate_cutout(  # noqa: C901
             "job_id": job_id,
             "mission": mission,
             "source_file": source_file,
-            "target": target,
-            "size_px": size,
-            "size_px_area": size[0] * size[1],
-            "size_bytes": size_bytes,
+            "target": {
+                "ra": target.ra,
+                "dec": target.dec,
+            },
+            "size_px": {
+                "x": size[0],
+                "y": size[1],
+                "area": size[0] * size[1],
+            },
+            "bytes": bytes,
             "total_s": timings_s["total"],
             "output_formats": output_formats,
         },
@@ -547,7 +553,7 @@ def generate_color_preview(
         )
         write_time = time.perf_counter()
 
-        jpg_size_bytes = Path(img_fname).stat().st_size
+        preview_bytes = Path(img_fname).stat().st_size
 
         fs: AbstractFileSystem
         output_is_s3 = output_dir.startswith("s3://")
@@ -558,8 +564,14 @@ def generate_color_preview(
 
         # Only create directories for local filesystem; S3 doesn't need them
         # and the isdir/mkdir calls are expensive LIST operations
-        if not output_is_s3 and not fs.isdir(output_dir):
-            fs.mkdir(output_dir)
+        try:
+            if not output_is_s3 and not fs.isdir(output_dir):
+                fs.mkdir(output_dir)
+        except FileExistsError:
+            logger.debug(f"Output directory already exists: {output_dir}")
+        except Exception as e:
+            logger.warning(f"Error creating output directory: {e}")
+            raise e
 
         fs.put(lpath=img_fname, rpath=output_dir)
 
@@ -570,10 +582,23 @@ def generate_color_preview(
         f"Color preview generated: size={size[0]}x{size[1]}px",
         extra={
             "event": "color_preview_generated",
-            "target": target,
-            "size_px": size,
-            "size_bytes": {"jpeg": jpg_size_bytes},
-            "source_files": {"red": red, "green": green, "blue": blue},
+            "target": {
+                "ra": target.ra,
+                "dec": target.dec,
+            },
+            "size_px": {
+                "x": size[0],
+                "y": size[1],
+                "area": size[0] * size[1],
+            },
+            "bytes": {
+                "preview": preview_bytes,
+            },
+            "source_files": {
+                "red": red,
+                "green": green,
+                "blue": blue,
+            },
             "total_s": round(upload_time - start_time, 4),
         },
     )
@@ -583,7 +608,7 @@ def generate_color_preview(
             "event": "color_preview_generated_timings",
             "timings_s": {
                 "astrocut_init": round(astrocut_time - start_time, 4),
-                "jpeg_write": round(write_time - astrocut_time, 4),
+                "preview_write": round(write_time - astrocut_time, 4),
                 "upload": round(upload_time - write_time, 4),
                 "total": round(upload_time - start_time, 4),
             },

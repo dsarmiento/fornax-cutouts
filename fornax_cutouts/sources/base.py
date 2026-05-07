@@ -64,7 +64,5 @@ class AbstractMissionSource(ABC):
         self,
         positions: TargetPosition | Positions,
         filters: str | list[str],
-        *args,
-        include_metadata: bool = False,
         **kwargs,
     ) -> list[FilenameLookupResponse]: ...
