@@ -83,7 +83,6 @@ def schedule_job(
             position=resolved_positions,
             mission_params=valid_mission_params,
             size=size,
-            include_metadata=True,
         )
 
         descriptors = []

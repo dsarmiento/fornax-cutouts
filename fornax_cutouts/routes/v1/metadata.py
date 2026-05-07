@@ -64,7 +64,6 @@ class MetadataHandler:
             mission_source = cutout_registry.get_mission(mission_name)
             mission_filenames = mission_source.get_filenames(
                 **request_dict,
-                include_metadata=True,
             )
 
             mission_total_files = sum(len(fname_response.filenames) for fname_response in mission_filenames)
@@ -102,7 +101,6 @@ class MetadataHandler:
 
         fnames = cutout_registry.get_mission(mission).get_filenames(
             position=resolve_positions(fname_request.position),
-            include_metadata=True,
             **mission_params,
         )
 

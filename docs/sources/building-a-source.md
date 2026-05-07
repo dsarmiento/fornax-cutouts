@@ -53,8 +53,6 @@ class MyMissionSource(AbstractMissionSource):
         position: TargetPosition | Positions,
         filter: str | list[str] = ["g", "r", "i"],
         survey: str | list[str] = ["wide"],
-        *args,
-        include_metadata: bool = False,
         **kwargs,
     ) -> list[FilenameLookupResponse]:
         filter = self._cast_list_parameter(filter)
@@ -160,8 +158,6 @@ class MyMissionSource(AbstractMissionSource):
         position: TargetPosition | Positions,
         filter: str | list[str] = ["g", "r", "i"],
         survey: str | list[str] = ["wide"],
-        *args,
-        include_metadata: bool = False,
         **kwargs,
     ) -> list[FilenameLookupResponse]:
         filter = self._cast_list_parameter(filter)
@@ -191,7 +187,7 @@ class MyMissionSource(AbstractMissionSource):
                     target=(ra, dec),
                     filenames=[FilenameWithMetadata(
                         filename=path,
-                        metadata={"filter": filt} if include_metadata else None,
+                        metadata={"filter": filt},
                     )],
                 )
             )
@@ -208,8 +204,6 @@ def get_filenames(
     self,
     position: TargetPosition | Positions,
     filter: str | list[str] = ["g"],
-    *args,
-    include_metadata: bool = False,
     **kwargs,
 ) -> list[FilenameLookupResponse]:
     filter = self._cast_list_parameter(filter)
