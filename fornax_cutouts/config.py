@@ -11,6 +11,7 @@ class DeploymentType(StrEnum):
 
 
 class DeploymentEnvironment(StrEnum):
+    SANDBOX = "sb"
     DEV = "dev"
     TEST = "test"
     PROD = "prod"

@@ -131,6 +131,11 @@ def setup_api_logging() -> None:
     log_level = CONFIG.log.level.upper()
     log_format = CONFIG.log.format.upper()
 
+    # Disable uvicorn access logger
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.propagate = False
+    uvicorn_access_logger.handlers = []
+
     _configure_logger(get_logger(), log_level, log_format, app="api")
 
     uvicorn_logger = logging.getLogger("uvicorn")

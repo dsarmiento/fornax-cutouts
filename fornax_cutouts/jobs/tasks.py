@@ -121,6 +121,7 @@ def schedule_job(
 
     push_pending_tasks_time = time.perf_counter()
     r.set_total_task_count(total_jobs)
+    r.increment_total_pending_tasks(total_jobs)
     r.update_job_phase(ExecutionPhase.EXECUTING)
     r.set_start_time()
     metadata_update_time = time.perf_counter()
@@ -353,7 +354,7 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
 def generate_cutout(  # noqa: C901
     source_file: str,
     target: TargetPosition,
-    size: int | tuple[int, int],
+    size: tuple[int, int],
     output_format: list[str],
     output_dir: str,
     mission: str = "sync_cutout",
@@ -366,7 +367,7 @@ def generate_cutout(  # noqa: C901
     Args:
         source_file (str): Source file
         target (TargetPosition): Target to center the cutout around
-        size (int | tuple[int, int]): Size of the cutout
+        size (tuple[int, int]): Size of the cutout
         output_format (list[str]): Formats of the resulting files (fits, jp(e)g)
         output_dir (str): Destination directory.
         mission (str, optional): The mission name (e.g., "ps1").
@@ -375,9 +376,6 @@ def generate_cutout(  # noqa: C901
             Defaults to {}.
     """
     start_time = time.perf_counter()
-
-    if isinstance(size, int):
-        size = (size, size)
 
     cutout_prefix = urlparse(source_file).path
     cutout_prefix = Path(cutout_prefix).stem
@@ -521,15 +519,12 @@ def generate_color_preview(
     green: str,
     blue: str,
     target: TargetPosition,
-    size: int | tuple[int, int],
+    size: tuple[int, int],
     output_dir: str,
 ) -> CutoutResponse:
     """
     Generate a color preview of a cutout
     """
-    if isinstance(size, int):
-        size = (size, size)
-
     cutout_prefix = urlparse(red).path
     cutout_prefix = Path(cutout_prefix).stem + "_color"
 
@@ -643,6 +638,8 @@ def execute_color_preview(
 ) -> CutoutResponse:
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
+    if isinstance(size, int):
+        size = (size, size)
     return generate_color_preview(
         red=red,
         green=green,
@@ -688,10 +685,15 @@ def execute_cutout(
     is_sync = job_id == "sync"
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
+    if isinstance(size, int):
+        size = (size, size)
+
+    resp = None
 
     if not is_sync:
         r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
         r.decrement_queued_task_count()
+        r.decrement_total_pending_tasks()
         r.increment_executing_task_count()
 
     try:
@@ -704,6 +706,25 @@ def execute_cutout(
             output_dir=output_dir,
             mission=mission,
             metadata=metadata,
+        )
+    except astrocut.exceptions.InvalidQueryError:
+        logger.info(
+            f"Cutout skipped (cutout has no data): job {job_id} - mission='{mission}' source='{source_file}'",
+            extra={
+                "event": "cutout_skipped",
+                "job_id": job_id,
+                "mission": mission,
+                "source_file": source_file,
+                "target": {
+                    "ra": target.ra,
+                    "dec": target.dec,
+                },
+                "size_px": {
+                    "x": size[0],
+                    "y": size[1],
+                    "area": size[0] * size[1],
+                },
+            },
         )
     except Exception as e:
         if not is_sync:

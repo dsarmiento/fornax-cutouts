@@ -23,6 +23,7 @@ from fornax_cutouts.utils.pagination import get_pagination_metadata
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
 CUTOUT_INDEX_NAME = "cutoutJobsIdx"
 CUTOUT_JOB_PREFIX = f"{CONFIG.worker.redis_prefix}:jobs"
+TOTAL_PENDING_TASKS_KEY = f"{CONFIG.worker.redis_prefix}:total_pending_tasks"
 POSITIONS_BATCH_SIZE = 100_000
 
 
@@ -61,6 +62,10 @@ class RedisKeys:
     @property
     def completed_task_count(self):
         return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:completed_task_count"
+
+    @property
+    def skipped_task_count(self):
+        return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:skipped_task_count"
 
     @property
     def total_task_count(self):
@@ -253,6 +258,7 @@ class AsyncRedisCutoutJob:
             pipe.get(self.__keys.queued_task_count)
             pipe.get(self.__keys.executing_task_count)
             pipe.get(self.__keys.completed_task_count)
+            pipe.get(self.__keys.skipped_task_count)
             pipe.llen(self.__keys.failed_tasks)
             pipe.get(self.__keys.total_task_count)
 
@@ -261,6 +267,7 @@ class AsyncRedisCutoutJob:
                 queued_tasks,
                 executing_tasks,
                 completed_tasks,
+                skipped_tasks,
                 failed_tasks,
                 total_tasks,
             ) = await pipe.execute()
@@ -269,6 +276,7 @@ class AsyncRedisCutoutJob:
         queued_tasks = int(queued_tasks) if queued_tasks else 0
         executing_tasks = int(executing_tasks) if executing_tasks else 0
         completed_tasks = int(completed_tasks) if completed_tasks else 0
+        skipped_tasks = int(skipped_tasks) if skipped_tasks else 0
         failed_tasks = int(failed_tasks) if failed_tasks else 0
         total_tasks = int(total_tasks) if total_tasks else 0
 
@@ -277,6 +285,7 @@ class AsyncRedisCutoutJob:
             "queued_jobs": queued_tasks,
             "executing_jobs": executing_tasks,
             "completed_jobs": completed_tasks,
+            "skipped_jobs": skipped_tasks,
             "failed_jobs": failed_tasks,
             "total_jobs": total_tasks,
         }
@@ -388,11 +397,20 @@ class SyncRedisCutoutJob:
     def decrement_executing_task_count(self, amount: int = 1) -> int:
         return self.__redis_client.decrby(self.__keys.executing_task_count, amount)
 
+    def increment_skipped_task_count(self, amount: int = 1) -> int:
+        return self.__redis_client.incrby(self.__keys.skipped_task_count, amount)
+
     def increment_completed_task_count(self, amount: int = 1) -> int:
         return self.__redis_client.incrby(self.__keys.completed_task_count, amount)
 
     def decrement_completed_task_count(self, amount: int = 1) -> int:
         return self.__redis_client.decrby(self.__keys.completed_task_count, amount)
+
+    def increment_total_pending_tasks(self, amount: int = 1):
+        self.__redis_client.incrby(TOTAL_PENDING_TASKS_KEY, amount)
+
+    def decrement_total_pending_tasks(self, amount: int = 1):
+        self.__redis_client.decrby(TOTAL_PENDING_TASKS_KEY, amount)
 
     def get_job_result_status(self):
         with self.__redis_client.pipeline() as pipe:
@@ -400,15 +418,19 @@ class SyncRedisCutoutJob:
             pipe.get(self.__keys.queued_task_count)
             pipe.get(self.__keys.executing_task_count)
             pipe.get(self.__keys.completed_task_count)
+            pipe.get(self.__keys.skipped_task_count)
             pipe.llen(self.__keys.failed_tasks)
             pipe.get(self.__keys.total_task_count)
 
-            pending_tasks, queued_tasks, executing_tasks, completed_tasks, failed_tasks, total_tasks = pipe.execute()
+            pending_tasks, queued_tasks, executing_tasks, completed_tasks, skipped_tasks, failed_tasks, total_tasks = (
+                pipe.execute()
+            )
 
         pending_tasks = int(pending_tasks) if pending_tasks else 0
         queued_tasks = int(queued_tasks) if queued_tasks else 0
         executing_tasks = int(executing_tasks) if executing_tasks else 0
         completed_tasks = int(completed_tasks) if completed_tasks else 0
+        skipped_tasks = int(skipped_tasks) if skipped_tasks else 0
         failed_tasks = int(failed_tasks) if failed_tasks else 0
         total_tasks = int(total_tasks) if total_tasks else 0
 
@@ -417,6 +439,7 @@ class SyncRedisCutoutJob:
             "queued_jobs": queued_tasks,
             "executing_jobs": executing_tasks,
             "completed_jobs": completed_tasks,
+            "skipped_jobs": skipped_tasks,
             "failed_jobs": failed_tasks,
             "total_jobs": total_tasks,
         }
