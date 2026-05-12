@@ -71,6 +71,27 @@ class RedisKeys:
     def total_task_count(self):
         return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:total_task_count"
 
+    def batch_outstanding(self, batch_num: int) -> str:
+        return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:batch:{batch_num}:outstanding"
+
+    def batch_descriptors(self, batch_num: int) -> str:
+        return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:batch:{batch_num}:descriptors"
+
+    def batch_results(self, batch_num: int) -> str:
+        return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:batch:{batch_num}:results"
+
+    def batch_started(self, batch_num: int) -> str:
+        return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:batch:{batch_num}:started"
+
+
+def recalculate_total_pending_tasks(redis_client: SyncRedisClient | SyncRedisCluster) -> int:
+    """Sum pending-task queue lengths across jobs and reset the global metric key."""
+    total = 0
+    for key in redis_client.scan_iter(match=f"{CUTOUT_JOB_PREFIX}:*:pending_tasks", count=500):
+        total += redis_client.llen(key)
+    redis_client.set(TOTAL_PENDING_TASKS_KEY, total)
+    return total
+
 
 def async_redis_client_factory():
     if CONFIG.redis.is_cluster:
@@ -411,6 +432,104 @@ class SyncRedisCutoutJob:
 
     def decrement_total_pending_tasks(self, amount: int = 1):
         self.__redis_client.decrby(TOTAL_PENDING_TASKS_KEY, amount)
+
+    def delete_batch_keys(self, batch_num: int):
+        keys = [
+            self.__keys.batch_outstanding(batch_num),
+            self.__keys.batch_descriptors(batch_num),
+            self.__keys.batch_results(batch_num),
+            self.__keys.batch_started(batch_num),
+        ]
+        self.__redis_client.delete(*keys)
+
+    def set_batch_outstanding(self, batch_num: int, count: int):
+        self.__redis_client.set(self.__keys.batch_outstanding(batch_num), count)
+
+    def get_batch_outstanding(self, batch_num: int) -> int:
+        raw = self.__redis_client.get(self.__keys.batch_outstanding(batch_num))
+        return int(raw) if raw is not None else 0
+
+    def decrement_batch_outstanding(self, batch_num: int) -> int:
+        return self.__redis_client.decr(self.__keys.batch_outstanding(batch_num))
+
+    def reset_batch_outstanding(self, batch_num: int):
+        self.__redis_client.set(self.__keys.batch_outstanding(batch_num), 0)
+
+    def set_batch_descriptors(self, batch_num: int, descriptors: list[dict]):
+        self.__redis_client.set(self.__keys.batch_descriptors(batch_num), json.dumps(descriptors))
+
+    def get_batch_descriptors(self, batch_num: int) -> list[dict]:
+        raw = self.__redis_client.get(self.__keys.batch_descriptors(batch_num))
+        if not raw:
+            return []
+        return json.loads(raw)
+
+    def record_batch_task_result(self, batch_num: int, increment_id: int, result_json: str):
+        self.__redis_client.hset(self.__keys.batch_results(batch_num), str(increment_id), result_json)
+
+    def batch_result_hexists(self, batch_num: int, increment_id: int) -> bool:
+        return bool(self.__redis_client.hexists(self.__keys.batch_results(batch_num), str(increment_id)))
+
+    def mark_batch_task_started(self, batch_num: int, increment_id: int):
+        self.__redis_client.hset(self.__keys.batch_started(batch_num), str(increment_id), "1")
+
+    def batch_task_was_started(self, batch_num: int, increment_id: int) -> bool:
+        return bool(self.__redis_client.hexists(self.__keys.batch_started(batch_num), str(increment_id)))
+
+    def get_batch_results(self, batch_num: int) -> list[Any]:
+        results = self.__redis_client.hgetall(self.__keys.batch_results(batch_num))
+        return [json.loads(raw) for raw in results]
+
+    # Task operations
+
+    def start_task(self, batch_num: int, increment_id: int):
+        with self.__redis_client.pipeline() as pipe:
+            pipe.hset(self.__keys.batch_started(batch_num), str(increment_id), "1")
+            pipe.decr(self.__keys.queued_task_count)
+            pipe.incr(self.__keys.executing_task_count)
+            pipe.execute()
+
+    def skip_task(self, batch_num: int):
+        with self.__redis_client.pipeline() as pipe:
+            pipe.decr(self.__keys.executing_task_count)
+            pipe.decr(self.__keys.batch_outstanding(batch_num))
+            pipe.incr(self.__keys.skipped_task_count)
+            pipe.execute()
+
+    def fail_task(self, task_kwargs: dict, error_message: str):
+        task_kwargs["error_message"] = error_message
+        with self.__redis_client.pipeline() as pipe:
+            pipe.rpush(self.__keys.failed_tasks, json_dumps_with_encoders(task_kwargs))
+            pipe.decr(self.__keys.executing_task_count)
+            pipe.execute()
+
+    def complete_task(self, batch_num: int, increment_id: int, result_json: str):
+        with self.__redis_client.pipeline() as pipe:
+            pipe.hset(self.__keys.batch_results(batch_num), str(increment_id), result_json)
+            pipe.decr(self.__keys.batch_outstanding(batch_num))
+            pipe.decr(self.__keys.executing_task_count)
+            pipe.incr(self.__keys.completed_task_count)
+            _, remaining, _, _ = pipe.execute()
+        return int(remaining) if remaining else 0
+
+    # Batch operations
+
+    # Finalized job operations
+    def create_job(self):
+        # Async
+        pass
+
+    def queue_job(self):
+        # Async
+        pass
+
+    def start_job(self):
+        self.update_job_phase(ExecutionPhase.EXECUTING)
+        self.set_start_time()
+
+    def complete_job(self):
+        self.update_job_phase(ExecutionPhase.COMPLETED)
+        self.set_end_time()
 
     def get_job_result_status(self):
         with self.__redis_client.pipeline() as pipe:
