@@ -1,6 +1,7 @@
 import gc
 import time
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
@@ -8,7 +9,7 @@ from urllib.parse import urlparse
 import astrocut
 from astropy.coordinates import SkyCoord
 from astropy.io.fits.hdu.hdulist import HDUList
-from celery import Task, chord
+from celery import Task
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
 
@@ -23,6 +24,12 @@ from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 STRETCH = "asinh"  # "sinh"
 MINMAX_PERCENT: list[float] = [0.5, 99.5]
+
+SCHEDULE_JOB_TASK_ID_TEMPLATE = "schedule_job-{job_id}"
+BATCH_CUTOUTS_TASK_ID_TEMPLATE = "batch_cutouts-{job_id}-{batch_num}"
+WRITE_RESULTS_TASK_ID_TEMPLATE = "write_results-{job_id}-{batch_num}"
+BATCH_WATCHDOG_TASK_ID_TEMPLATE = "batch_watchdog-{job_id}-{batch_num}"
+EXECUTE_CUTOUT_TASK_ID_TEMPLATE = "execute_cutout-{job_id}-{batch_num}-{increment_id}"
 
 
 @celery_app.task(
@@ -104,9 +111,8 @@ def schedule_job(
         num_jobs = len(descriptors)
 
         if num_jobs == 0:
-            r.set_start_time()
-            r.set_end_time()
-            r.update_job_phase(ExecutionPhase.COMPLETED)
+            r.start_job()
+            r.complete_job()
             del target_fnames, descriptors, resolved_positions
             gc.collect()
             logger.info(
@@ -122,13 +128,14 @@ def schedule_job(
     push_pending_tasks_time = time.perf_counter()
     r.set_total_task_count(total_jobs)
     r.increment_total_pending_tasks(total_jobs)
-    r.update_job_phase(ExecutionPhase.EXECUTING)
-    r.set_start_time()
+
     metadata_update_time = time.perf_counter()
 
-    batch_cutouts_task = batch_cutouts.s(job_id=job_id)
-    batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-0")
-    batch_cutouts_task.delay()
+    batch_num = r.increment_batch_num()
+    batch_cutouts.apply_async(
+        kwargs={"job_id": job_id, "batch_num": batch_num},
+        task_id=BATCH_CUTOUTS_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
+    )
 
     batch_cutouts_task_time = time.perf_counter()
 
@@ -166,16 +173,13 @@ def schedule_job(
     time_limit=35 * 60,
     queue="high_mem",
 )
-def batch_cutouts(self: Task, job_id: str):
+def batch_cutouts(self: Task, job_id: str, batch_num: int):
     """
-    Chunked batcher: pops descriptors from Redis in batches and creates generate_cutout tasks
-    using a Celery chord. The chord callback (write_results) handles completion and looping back.
+    Chunked batcher: pops descriptors from Redis in batches, dispatches execute_cutout tasks,
+    and relies on the last task in the batch to enqueue write_results after Redis-tracked completion.
     """
     start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
-
-    batch_num = r.increment_batch_num()
-    batch_num_time = time.perf_counter()
 
     pool_size = get_pool_size_for_queue("cutouts")
     batch_size = pool_size * CONFIG.worker.batch_size_per_worker
@@ -185,35 +189,48 @@ def batch_cutouts(self: Task, job_id: str):
 
     if not descriptors:
         return
+
+    r.decrement_total_pending_tasks(len(descriptors))
     r.increment_queued_task_count(len(descriptors))
     increment_queued_task_count_time = time.perf_counter()
 
-    # Build signatures for all cutout tasks in this batch
-    cutout_sigs = []
+    r.delete_batch_keys(batch_num)
+    r.set_batch_descriptors(batch_num, descriptors)
+    r.set_batch_outstanding(batch_num, len(descriptors))
+
+    eta = datetime.now(tz=timezone.utc) + timedelta(minutes=CONFIG.worker.batch_watchdog_timeout_minutes)
+    batch_watchdog.apply_async(
+        kwargs={
+            "job_id": job_id,
+            "batch_num": batch_num,
+            "expected_count": len(descriptors),
+        },
+        eta=eta,
+        task_id=BATCH_WATCHDOG_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
+    )
+
     for increment_id, desc in enumerate(descriptors):
-        # Convert target list back to TargetPosition NamedTuple
         target = TargetPosition(ra=desc["target"][0], dec=desc["target"][1])
-        sig = execute_cutout.si(
-            job_id=desc["job_id"],
-            source_file=desc["source_file"],
-            target=target,
-            size=desc["size"],
-            output_format=desc["output_format"],
-            output_dir=desc["output_dir"],
-            mission=desc["mission"],
-            metadata=desc.get("metadata"),
+        execute_cutout.apply_async(
+            kwargs={
+                "job_id": desc["job_id"],
+                "source_file": desc["source_file"],
+                "target": target,
+                "size": desc["size"],
+                "output_format": desc["output_format"],
+                "output_dir": desc["output_dir"],
+                "mission": desc["mission"],
+                "metadata": desc.get("metadata"),
+                "batch_num": batch_num,
+                "increment_id": increment_id,
+            },
+            task_id=EXECUTE_CUTOUT_TASK_ID_TEMPLATE.format(
+                job_id=job_id, batch_num=batch_num, increment_id=increment_id
+            ),
+            priority=2,
         )
-        sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}", priority=2)
-        cutout_sigs.append(sig)
 
-    build_cutout_sigs_time = time.perf_counter()
-
-    # Use chord to run all cutout tasks in parallel, then call write_results with their results
-    write_results_sig = write_results.s(job_id=job_id)
-    write_results_sig.set(task_id=f"write_results-{job_id}-{batch_num}")
-    chord(cutout_sigs)(write_results_sig)
-
-    chord_time = time.perf_counter()
+    dispatch_time = time.perf_counter()
 
     logger.info(
         f"Job {job_id} batch {batch_num}: dispatched {len(descriptors)} cutout(s)",
@@ -224,7 +241,7 @@ def batch_cutouts(self: Task, job_id: str):
             "pool_size": pool_size,
             "batch_size": batch_size,
             "num_cutouts": len(descriptors),
-            "total_s": round(chord_time - start_time, 4),
+            "total_s": round(dispatch_time - start_time, 4),
         },
     )
     logger.debug(
@@ -234,12 +251,10 @@ def batch_cutouts(self: Task, job_id: str):
             "job_id": job_id,
             "batch_num": batch_num,
             "timings_s": {
-                "batch_num": round(batch_num_time - start_time, 4),
-                "pop_pending_tasks": round(pop_pending_tasks_time - batch_num_time, 4),
+                "pop_pending_tasks": round(pop_pending_tasks_time - start_time, 4),
                 "increment_queued_count": round(increment_queued_task_count_time - pop_pending_tasks_time, 4),
-                "build_cutout_sigs": round(build_cutout_sigs_time - increment_queued_task_count_time, 4),
-                "chord_dispatch": round(chord_time - build_cutout_sigs_time, 4),
-                "total": round(chord_time - start_time, 4),
+                "dispatch_cutouts": round(dispatch_time - increment_queued_task_count_time, 4),
+                "total": round(dispatch_time - start_time, 4),
             },
         },
     )
@@ -247,97 +262,144 @@ def batch_cutouts(self: Task, job_id: str):
 
 @celery_app.task(
     bind=True,
+    ignore_result=True,
     queue="high_mem",
 )
-def write_results(self: Task, results: list[CutoutResponse | dict | None], job_id: str):
+def batch_watchdog(self: Task, job_id: str, batch_num: int, expected_count: int):
+    """Recover a stalled batch by requeueing stranded descriptors."""
+    r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
+    outstanding = r.get_batch_outstanding(batch_num)
+    if outstanding <= 0:
+        return
+
+    logger.warning(
+        f"Job {job_id} batch {batch_num}: watchdog recovering stalled batch (outstanding={outstanding})",
+        extra={
+            "event": "batch_watchdog_recover",
+            "job_id": job_id,
+            "batch_num": batch_num,
+            "outstanding": outstanding,
+            "expected_count": expected_count,
+        },
+    )
+
+    descriptors = r.get_batch_descriptors(batch_num)
+    stranded: list[dict] = []
+    for i in range(expected_count):
+        if not r.batch_result_hexists(batch_num, i):
+            stranded.append(descriptors[i])
+            if r.batch_task_was_started(batch_num, i):
+                r.decrement_executing_task_count()
+            else:
+                r.decrement_queued_task_count()
+
+    if stranded:
+        r.push_pending_tasks(stranded)
+        r.increment_total_pending_tasks(len(stranded))
+
+    r.reset_batch_outstanding(batch_num)
+    write_results.run(job_id=job_id, batch_num=batch_num)
+
+
+@celery_app.task(
+    bind=True,
+    queue="high_mem",
+)
+def write_results(self: Task, job_id: str, batch_num: int):
     """
-    Chord callback: receives results from a batch of generate_cutout tasks and writes them to AsyncCutoutResults.
-    Checks if job is complete; if not, loops back to batch_cutouts for the next batch.
+    Batch result writer: collects completed cutout results and writes them to AsyncCutoutResults.
+    Checks if the job is complete, and if not, schedules the next batch
 
     Args:
-        results: List of CutoutResponse objects (or dicts/None for failed tasks) from the chord
-        job_id: The job ID to write results for
+        job_id (str): The job ID to write results for
+        batch_num (int): The number of the batch to write results for
     """
     start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
-    # Filter out None/failed results and validate
-    cutout_results = []
-    for rp in results:
-        if rp is None:
-            continue
-        elif isinstance(rp, dict):
-            cutout_results.append(CutoutResponse.model_validate(rp))
-        elif isinstance(rp, CutoutResponse):
-            cutout_results.append(rp)
-        else:
-            continue
-    filter_results_time = time.perf_counter()
+    try:
+        results = r.get_batch_results(batch_num)
 
-    # Write results to Parquet storage if we have any
-    batch_num = None
-    if cutout_results:
-        results_writer = CutoutResults(job_id)
-        batch_num = r.get_batch_num()
-        results_writer.add_results(results=cutout_results, batch_num=batch_num)
-    write_results_time = time.perf_counter()
+        cutout_results = []
+        for result in results:
+            if result is None:
+                continue
+            elif isinstance(result, dict):
+                cutout_results.append(CutoutResponse.model_validate(result))
+            elif isinstance(result, CutoutResponse):
+                cutout_results.append(result)
+            else:
+                continue
+        filter_results_time = time.perf_counter()
 
-    # Check if job is complete and update job phase
-    job_status = r.get_job_result_status()
-    completed_tasks = job_status["completed_jobs"]
-    failed_tasks = job_status["failed_jobs"]
-    pending_tasks = job_status["pending_jobs"]
-    expected_total = job_status["total_jobs"]
-    total_completed = completed_tasks + failed_tasks
-    job_complete = total_completed >= expected_total and pending_tasks == 0
+        if cutout_results:
+            results_writer = CutoutResults(job_id)
+            results_writer.add_results(results=cutout_results, batch_num=batch_num)
+        write_results_time = time.perf_counter()
 
-    if job_complete:
-        r.update_job_phase(ExecutionPhase.COMPLETED)
-        r.set_end_time()
+        job_status = r.get_job_result_status()
+        completed_tasks = job_status["completed_jobs"]
+        failed_tasks = job_status["failed_jobs"]
+        skipped_tasks = job_status["skipped_jobs"]
+        pending_tasks = job_status["pending_jobs"]
+        expected_total = job_status["total_jobs"]
+        total_completed = completed_tasks + failed_tasks + skipped_tasks
+        job_complete = total_completed == expected_total and pending_tasks == 0
 
-    elif pending_tasks > 0:
-        next_batch = r.increment_batch_num()
-        batch_cutouts_task = batch_cutouts.s(job_id=job_id)
-        batch_cutouts_task.set(task_id=f"batch_cutouts-{job_id}-{next_batch}")
-        batch_cutouts_task.delay()
+        if job_complete:
+            r.complete_job()
 
-    update_job_time = time.perf_counter()
+        elif pending_tasks > 0:
+            next_batch = r.increment_batch_num()
+            batch_cutouts.apply_async(
+                kwargs={
+                    "job_id": job_id,
+                    "batch_num": next_batch,
+                },
+                task_id=BATCH_CUTOUTS_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=next_batch),
+            )
 
-    cutouts_per_mission: dict[str, int] = {}
-    for cr in cutout_results:
-        cutouts_per_mission[cr.mission] = cutouts_per_mission.get(cr.mission, 0) + 1
+        update_job_time = time.perf_counter()
 
-    logger.info(
-        f"Job {job_id} batch results: {len(cutout_results)} succeeded, {len(results) - len(cutout_results)} failed",
-        extra={
-            "event": "batch_results_written",
-            "job_id": job_id,
-            "batch_num": batch_num,
-            "successful_cutouts": len(cutout_results),
-            "failed_in_batch": len(results) - len(cutout_results),
-            "cutouts_per_mission": cutouts_per_mission,
-            "total_completed": total_completed,
-            "total_failed": failed_tasks,
-            "pending_tasks": pending_tasks,
-            "expected_total": expected_total,
-            "job_complete": job_complete,
-            "total_s": round(update_job_time - start_time, 4),
-        },
-    )
-    logger.debug(
-        f"Job {job_id} batch results timings",
-        extra={
-            "event": "batch_results_written_timings",
-            "job_id": job_id,
-            "batch_num": batch_num,
-            "timings_s": {
-                "filter_results": round(filter_results_time - start_time, 4),
-                "write_results": round(write_results_time - filter_results_time, 4),
-                "update_job": round(update_job_time - write_results_time, 4),
-                "total": round(update_job_time - start_time, 4),
+        cutouts_per_mission: dict[str, int] = defaultdict(lambda: 0)
+        for cr in cutout_results:
+            cutouts_per_mission[cr.mission] += 1
+
+        failed_in_batch = sum(1 for x in results if x is None)
+
+        logger.info(
+            f"Job {job_id} batch {batch_num}: results: {len(cutout_results)} succeeded, {failed_in_batch} missing/null",
+            extra={
+                "event": "batch_results_written",
+                "job_id": job_id,
+                "batch_num": batch_num,
+                "successful_cutouts": len(cutout_results),
+                "failed_in_batch": failed_in_batch,
+                "cutouts_per_mission": cutouts_per_mission,
+                "total_completed": total_completed,
+                "total_failed": failed_tasks,
+                "pending_tasks": pending_tasks,
+                "expected_total": expected_total,
+                "job_complete": job_complete,
+                "total_s": round(update_job_time - start_time, 4),
             },
-        },
-    )
+        )
+        logger.debug(
+            f"Job {job_id} batch results timings",
+            extra={
+                "event": "batch_results_written_timings",
+                "job_id": job_id,
+                "batch_num": batch_num,
+                "timings_s": {
+                    "filter_results": round(filter_results_time - start_time, 4),
+                    "write_results": round(write_results_time - filter_results_time, 4),
+                    "update_job": round(update_job_time - write_results_time, 4),
+                    "total": round(update_job_time - start_time, 4),
+                },
+            },
+        )
+    finally:
+        r.delete_batch_keys(batch_num)
 
 
 def get_fits_filter(fits_cutout: HDUList) -> str | None:
@@ -665,6 +727,8 @@ def execute_cutout(
     output_dir: str = "",
     mission: str = "",
     metadata: dict = {},
+    batch_num: int = 0,
+    increment_id: int = 0,
 ) -> CutoutResponse | None:
     """
     Generate a cutout within the specific source file
@@ -681,6 +745,8 @@ def execute_cutout(
             Defaults to "".
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to None.
+        batch_num (int): Async batch identifier; 0 for non-batched (e.g. sync) tasks.
+        increment_id (int): Index within the batch for Redis aggregation.
     """
     is_sync = job_id == "sync"
     if isinstance(target, list):
@@ -689,12 +755,11 @@ def execute_cutout(
         size = (size, size)
 
     resp = None
+    r: SyncRedisCutoutJob | None = None
 
     if not is_sync:
         r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
-        r.decrement_queued_task_count()
-        r.decrement_total_pending_tasks()
-        r.increment_executing_task_count()
+        r.start_task(batch_num, increment_id)
 
     try:
         resp = generate_cutout(
@@ -707,6 +772,7 @@ def execute_cutout(
             mission=mission,
             metadata=metadata,
         )
+
     except astrocut.exceptions.InvalidQueryError:
         logger.info(
             f"Cutout skipped (cutout has no data): job {job_id} - mission='{mission}' source='{source_file}'",
@@ -726,10 +792,13 @@ def execute_cutout(
                 },
             },
         )
+        if not is_sync:
+            r.skip_task(batch_num)
+        return None
+
     except Exception as e:
         if not is_sync:
-            r.decrement_executing_task_count()
-            r.push_failed_task(
+            r.fail_task(
                 task_kwargs={
                     "job_id": job_id,
                     "source_file": source_file,
@@ -758,8 +827,18 @@ def execute_cutout(
         )
         return None
 
-    if not is_sync:
-        r.decrement_executing_task_count()
-        r.increment_completed_task_count()
+    finally:
+        if not is_sync:
+            result_payload = resp.model_dump_json() if resp is not None else None
+            remaining = r.complete_task(batch_num, increment_id, result_payload)
+            if remaining == 0:
+                celery_app.control.revoke(
+                    BATCH_WATCHDOG_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
+                    terminate=False,
+                )
+                write_results.apply_async(
+                    kwargs={"job_id": job_id, "batch_num": batch_num},
+                    task_id=WRITE_RESULTS_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
+                )
 
     return resp

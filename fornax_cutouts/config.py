@@ -43,6 +43,7 @@ class WorkerConfig(BaseModel):
     batch_size_per_worker: int = 5
     prefetch_multiplier: int = 1
     max_tasks_per_child: int = 50
+    batch_watchdog_timeout_minutes: int = 45
 
 
 class StorageConfig(BaseModel):
