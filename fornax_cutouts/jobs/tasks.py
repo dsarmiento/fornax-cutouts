@@ -21,6 +21,9 @@ from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
+STRETCH = "asinh"  # "sinh"
+MINMAX_PERCENT: list[float] = [0.5, 99.5]
+
 
 @celery_app.task(
     bind=True,
@@ -62,7 +65,7 @@ def schedule_job(
     valid_mission_params: dict[str, dict] = {}
     for mission, is_valid in validated_params.items():
         if not is_valid:
-            logger.error(
+            logger.warning(
                 f"Mission {mission!r} params are not valid",
                 extra={"event": "mission_params_invalid", "job_id": job_id, "mission": mission},
             )
@@ -80,7 +83,6 @@ def schedule_job(
             position=resolved_positions,
             mission_params=valid_mission_params,
             size=size,
-            include_metadata=True,
         )
 
         descriptors = []
@@ -200,7 +202,7 @@ def batch_cutouts(self: Task, job_id: str):
             mission=desc["mission"],
             metadata=desc.get("metadata"),
         )
-        sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}")
+        sig.set(task_id=f"generate_cutout-{job_id}-{batch_num}-{increment_id}", priority=2)
         cutout_sigs.append(sig)
 
     build_cutout_sigs_time = time.perf_counter()
@@ -348,7 +350,7 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
     return filter
 
 
-def generate_cutout(
+def generate_cutout(  # noqa: C901
     source_file: str,
     target: TargetPosition,
     size: int | tuple[int, int],
@@ -389,15 +391,23 @@ def generate_cutout(
 
     # Only create directories for local filesystem; S3 doesn't need them
     # and the isdir/mkdir calls are expensive LIST operations
-    if not output_is_s3 and not fs.isdir(output_dir):
-        fs.mkdir(output_dir)
+    try:
+        if not output_is_s3 and not fs.isdir(output_dir):
+            fs.mkdir(output_dir)
+    except FileExistsError:
+        logger.debug(f"Output directory already exists: {output_dir}")
+    except Exception as e:
+        logger.warning(f"Error creating output directory: {e}")
+        raise e
 
     init_time = time.perf_counter()
 
     fits_fname = ""
     img_fname = ""
-    fits_size_bytes = 0
-    jpg_size_bytes = 0
+    science_bytes = 0
+    preview_bytes = 0
+    science_out_format = ""
+    preview_out_format = ""
 
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
@@ -410,6 +420,7 @@ def generate_cutout(
         astrocut_init_time = time.perf_counter()
 
         if "fits" in output_format:
+            science_out_format = "fits"
             fits_fname = cutout.write_as_fits(
                 output_dir=temp_output_dir,
                 cutout_prefix=cutout_prefix,
@@ -417,20 +428,23 @@ def generate_cutout(
         fits_write_time = time.perf_counter()
 
         if "jpg" in output_format or "jpeg" in output_format:
+            preview_out_format = "jpeg"
             img_fname = cutout.write_as_img(
                 output_dir=temp_output_dir,
                 cutout_prefix=cutout_prefix,
+                stretch=STRETCH,
+                minmax_percent=MINMAX_PERCENT,
             )[0]
         jpg_write_time = time.perf_counter()
 
         if fits_fname:
-            fits_size_bytes = Path(fits_fname).stat().st_size
+            science_bytes = Path(fits_fname).stat().st_size
             fits_dest_fname = fits_fname.replace(temp_output_dir, output_dir)
             fs.put(lpath=fits_fname, rpath=fits_dest_fname)
             fits_fname = fits_dest_fname
 
         if img_fname:
-            jpg_size_bytes = Path(img_fname).stat().st_size
+            preview_bytes = Path(img_fname).stat().st_size
             img_dest_fname = img_fname.replace(temp_output_dir, output_dir)
             fs.put(lpath=img_fname, rpath=img_dest_fname)
             img_fname = img_dest_fname
@@ -439,7 +453,8 @@ def generate_cutout(
 
     end_time = time.perf_counter()
 
-    size_bytes = {}
+    bytes = {}
+    output_formats = {}
     timings_s = {
         "init": round(init_time - start_time, 4),
         "astrocut_init": round(astrocut_init_time - astrocut_init_start, 4),
@@ -448,12 +463,14 @@ def generate_cutout(
     }
 
     if fits_fname:
-        size_bytes["fits"] = fits_size_bytes
-        timings_s["fits_write"] = round(fits_write_time - astrocut_init_time, 4)
+        output_formats["science"] = science_out_format
+        bytes["science"] = science_bytes
+        timings_s["science_write"] = round(fits_write_time - astrocut_init_time, 4)
 
     if img_fname:
-        size_bytes["jpeg"] = jpg_size_bytes
-        timings_s["jpeg_write"] = round(jpg_write_time - fits_write_time, 4)
+        output_formats["preview"] = preview_out_format
+        bytes["preview"] = preview_bytes
+        timings_s["preview_write"] = round(jpg_write_time - fits_write_time, 4)
 
     logger.info(
         f"Cutout generated: job {job_id} - mission='{mission}' source='{source_file}' size={size[0]}x{size[1]}px",
@@ -462,10 +479,18 @@ def generate_cutout(
             "job_id": job_id,
             "mission": mission,
             "source_file": source_file,
-            "target": target,
-            "size_px": size,
-            "size_bytes": size_bytes,
+            "target": {
+                "ra": target.ra,
+                "dec": target.dec,
+            },
+            "size_px": {
+                "x": size[0],
+                "y": size[1],
+                "area": size[0] * size[1],
+            },
+            "bytes": bytes,
             "total_s": timings_s["total"],
+            "output_formats": output_formats,
         },
     )
     logger.debug(
@@ -485,7 +510,7 @@ def generate_cutout(
         position=target,
         size_px=size,
         filter=filter_val,
-        fits=fits_fname,
+        science=fits_fname,
         preview=img_fname,
         mission_extras=mission_extras,
     )
@@ -522,10 +547,12 @@ def generate_color_preview(
             output_dir=temp_output_dir,
             cutout_prefix=cutout_prefix,
             colorize=True,
+            stretch=STRETCH,
+            minmax_percent=MINMAX_PERCENT,
         )
         write_time = time.perf_counter()
 
-        jpg_size_bytes = Path(img_fname).stat().st_size
+        preview_bytes = Path(img_fname).stat().st_size
 
         fs: AbstractFileSystem
         output_is_s3 = output_dir.startswith("s3://")
@@ -536,8 +563,14 @@ def generate_color_preview(
 
         # Only create directories for local filesystem; S3 doesn't need them
         # and the isdir/mkdir calls are expensive LIST operations
-        if not output_is_s3 and not fs.isdir(output_dir):
-            fs.mkdir(output_dir)
+        try:
+            if not output_is_s3 and not fs.isdir(output_dir):
+                fs.mkdir(output_dir)
+        except FileExistsError:
+            logger.debug(f"Output directory already exists: {output_dir}")
+        except Exception as e:
+            logger.warning(f"Error creating output directory: {e}")
+            raise e
 
         fs.put(lpath=img_fname, rpath=output_dir)
 
@@ -548,10 +581,23 @@ def generate_color_preview(
         f"Color preview generated: size={size[0]}x{size[1]}px",
         extra={
             "event": "color_preview_generated",
-            "target": target,
-            "size_px": size,
-            "size_bytes": {"jpeg": jpg_size_bytes},
-            "source_files": {"red": red, "green": green, "blue": blue},
+            "target": {
+                "ra": target.ra,
+                "dec": target.dec,
+            },
+            "size_px": {
+                "x": size[0],
+                "y": size[1],
+                "area": size[0] * size[1],
+            },
+            "bytes": {
+                "preview": preview_bytes,
+            },
+            "source_files": {
+                "red": red,
+                "green": green,
+                "blue": blue,
+            },
             "total_s": round(upload_time - start_time, 4),
         },
     )
@@ -561,7 +607,7 @@ def generate_color_preview(
             "event": "color_preview_generated_timings",
             "timings_s": {
                 "astrocut_init": round(astrocut_time - start_time, 4),
-                "jpeg_write": round(write_time - astrocut_time, 4),
+                "preview_write": round(write_time - astrocut_time, 4),
                 "upload": round(upload_time - write_time, 4),
                 "total": round(upload_time - start_time, 4),
             },
@@ -586,6 +632,32 @@ def generate_color_preview(
     pydantic=True,
     queue="cutouts",
 )
+def execute_color_preview(
+    self: Task,
+    red: str,
+    green: str,
+    blue: str,
+    target: TargetPosition | list[float],
+    size: int | tuple[int, int],
+    output_dir: str,
+) -> CutoutResponse:
+    if isinstance(target, list):
+        target = TargetPosition(ra=target[0], dec=target[1])
+    return generate_color_preview(
+        red=red,
+        green=green,
+        blue=blue,
+        target=target,
+        size=size,
+        output_dir=output_dir,
+    )
+
+
+@celery_app.task(
+    bind=True,
+    pydantic=True,
+    queue="cutouts",
+)
 def execute_cutout(
     self: Task,
     job_id: str,
@@ -596,7 +668,7 @@ def execute_cutout(
     output_dir: str = "",
     mission: str = "",
     metadata: dict = {},
-) -> CutoutResponse:
+) -> CutoutResponse | None:
     """
     Generate a cutout within the specific source file
 
@@ -613,12 +685,15 @@ def execute_cutout(
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to None.
     """
+    is_sync = job_id == "sync"
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
 
-    r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
-    r.decrement_queued_task_count()
-    r.increment_executing_task_count()
+    if not is_sync:
+        r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
+        r.decrement_queued_task_count()
+        r.increment_executing_task_count()
+
     try:
         resp = generate_cutout(
             job_id=job_id,
@@ -631,21 +706,22 @@ def execute_cutout(
             metadata=metadata,
         )
     except Exception as e:
-        r.decrement_executing_task_count()
-        r.push_failed_task(
-            task_kwargs={
-                "job_id": job_id,
-                "source_file": source_file,
-                "target": target,
-                "size": size,
-                "output_format": output_format,
-                "output_dir": output_dir,
-                "mission": mission,
-                "metadata": metadata,
-            },
-            error_message=str(e),
-        )
-        logger.error(
+        if not is_sync:
+            r.decrement_executing_task_count()
+            r.push_failed_task(
+                task_kwargs={
+                    "job_id": job_id,
+                    "source_file": source_file,
+                    "target": target,
+                    "size": size,
+                    "output_format": output_format,
+                    "output_dir": output_dir,
+                    "mission": mission,
+                    "metadata": metadata,
+                },
+                error_message=str(e),
+            )
+        logger.warning(
             f"Cutout failed for job {job_id}: {e!r}",
             extra={
                 "event": "cutout_failed",
@@ -661,7 +737,8 @@ def execute_cutout(
         )
         return None
 
-    r.decrement_executing_task_count()
-    r.increment_completed_task_count()
+    if not is_sync:
+        r.decrement_executing_task_count()
+        r.increment_completed_task_count()
 
     return resp

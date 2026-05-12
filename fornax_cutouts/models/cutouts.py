@@ -69,5 +69,5 @@ class CutoutRequest(BaseModel):
 
 
 class CutoutResponse(CutoutRequest):
-    fits: str | None = None
+    science: str | None = None
     preview: str | None = None

@@ -35,15 +35,15 @@ No imports or explicit registration calls are needed in your application code â€
 
 ### Registry Methods
 
-| Method                                                                   | Description                                                                                                          |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `register_source()`                                                      | Decorator that registers a source class under the given mission name.                                                |
-| `discover_sources()`                                                     | Scans `CUTOUTS__SOURCE_PATH` and executes all `.py` files. Called at startup.                                        |
-| `get_source_names()`                                                     | Returns a sorted list of all registered mission keys.                                                                |
-| `get_mission(mission)`                                                   | Returns the `AbstractMissionSource` instance for a given key. Raises `ValueError` if not found.                      |
-| `get_mission_metadata()`                                                 | Returns a dict mapping mission names to their `MissionMetadata`.                                                     |
-| `validate_mission_params(mission_params, size)`                          | Validates request parameters against each mission's constraints. Returns a dict of `{mission: bool}`.                |
-| `get_target_filenames(position, mission_params, size, include_metadata)` | Calls `get_filenames()` on each requested mission and returns the combined list of `FilenameLookupResponse` objects. |
+| Method                                                 | Description                                                                                                          |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `register_source()`                                    | Decorator that registers a source class under the given mission name.                                                |
+| `discover_sources()`                                   | Scans `CUTOUTS__SOURCE_PATH` and executes all `.py` files. Called at startup.                                        |
+| `get_source_names()`                                   | Returns a sorted list of all registered mission keys.                                                                |
+| `get_mission(mission)`                                 | Returns the `AbstractMissionSource` instance for a given key. Raises `ValueError` if not found.                      |
+| `get_mission_metadata()`                               | Returns a dict mapping mission names to their `MissionMetadata`.                                                     |
+| `validate_mission_params(mission_params, size)`        | Validates request parameters against each mission's constraints. Returns a dict of `{mission: bool}`.                |
+| `get_target_filenames(position, mission_params, size)` | Calls `get_filenames()` on each requested mission and returns the combined list of `FilenameLookupResponse` objects. |
 
 ---
 
@@ -99,8 +99,6 @@ class MySource(AbstractMissionSource):
         self,
         positions: TargetPosition | Positions,
         filters: str | list[str],
-        *args,
-        include_metadata: bool = False,
         **kwargs,
     ) -> list[FilenameLookupResponse]:
         ...
@@ -138,22 +136,18 @@ You can override `validate_request()` to add custom validation logic.
 ```python
 from fornax_cutouts.models.cutouts import FilenameLookupResponse, FilenameWithMetadata
 
-# Minimal response (no metadata)
 FilenameLookupResponse(
     mission="my_mission",
-    filename="s3://my-bucket/data/file.fits",
-)
-
-# With metadata (used when include_metadata=True)
-FilenameLookupResponse(
-    mission="my_mission",
-    filename="s3://my-bucket/data/file.fits",
+    target=(12.345, 67.89),
     metadata=FilenameWithMetadata(
-        filter="r",
-        survey="main",
-        ra=83.8221,
-        dec=-5.3911,
-    ),
+        filename="s3://my-bucket/data/file.fits",
+        metadata={
+            "filter": "r",
+            "survey": "main",
+            "ra": 83.8221,
+            "dec": -5.3911,
+        }
+    )
 )
 ```
 

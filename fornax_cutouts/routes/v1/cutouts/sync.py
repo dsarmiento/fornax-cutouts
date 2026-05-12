@@ -1,20 +1,36 @@
 import asyncio
+import time
 import uuid
 from typing import Annotated
 from urllib.parse import urlencode
 
-from astrocut.exceptions import InvalidQueryError
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi_utils.cbv import cbv
 from fsspec import AbstractFileSystem, filesystem
 
 from fornax_cutouts.config import CONFIG
-from fornax_cutouts.jobs.tasks import generate_color_preview, generate_cutout
+from fornax_cutouts.jobs.tasks import execute_color_preview, execute_cutout
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
 
 sync_router = APIRouter(prefix="/cutouts", tags=["Sync Cutouts"])
+
+
+async def _wait_for_result(async_result, timeout: float = 15.0, poll_interval: float = 0.2):
+    """
+    Poll for a Celery task result by repeatedly calling ready() instead of using the
+    pubsub-based AsyncResult.get(). The pubsub get() holds a single socket open and is
+    not safe to call concurrently from asyncio.to_thread: concurrent threads share the
+    same pubsub connection and interleave RESP2 reads, producing InvalidResponse errors.
+    ready() uses the normal connection pool (one pooled GET per call) and is safe.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if await asyncio.to_thread(async_result.ready):
+            return await asyncio.to_thread(async_result.get, propagate=True)
+        await asyncio.sleep(poll_interval)
+    raise TimeoutError(f"Sync cutout task did not complete within {timeout}s")
 
 
 @cbv(sync_router)
@@ -58,32 +74,32 @@ class CutoutsSyncHandler:
             job_id = uuid.uuid4().hex[:8]
 
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
-
-        try:
-            ret = await asyncio.to_thread(
-                generate_cutout,
-                source_file=filename,
-                target=TargetPosition(ra, dec),
-                size=size,
-                output_format=output_formats,
-                output_dir=output_dir,
-                mission="sync",
-            )
-        except InvalidQueryError as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=e,
-            )
+        task_uid = uuid.uuid4().hex[:12]
+        async_result = execute_cutout.apply_async(
+            kwargs={
+                "job_id": job_id,
+                "source_file": filename,
+                "target": TargetPosition(ra, dec),
+                "size": size,
+                "output_format": output_formats,
+                "output_dir": output_dir,
+                "mission": "sync",
+            },
+            task_id=f"sync-single-{job_id}-{task_uid}",
+            priority=0,
+        )
+        ret = await _wait_for_result(async_result, timeout=CONFIG.redis.timeout)
+        ret = CutoutResponse.model_validate(ret)
 
         if CONFIG.storage.is_s3:
             fs: AbstractFileSystem = filesystem("s3")
-            if ret.fits:
-                ret.fits = fs.sign(ret.fits, expiration=CONFIG.sync_ttl)
+            if ret.science:
+                ret.science = fs.sign(ret.science, expiration=CONFIG.sync_ttl)
             if ret.preview:
                 ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
         else:
-            if ret.fits:
-                ret.fits = ret.fits.replace(CONFIG.storage.prefix, "")
+            if ret.science:
+                ret.science = ret.science.replace(CONFIG.storage.prefix, "")
             if ret.preview:
                 ret.preview = ret.preview.replace(CONFIG.storage.prefix, "")
 
@@ -111,22 +127,21 @@ class CutoutsSyncHandler:
             job_id = uuid.uuid4().hex[:8]
 
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
-
-        try:
-            ret = await asyncio.to_thread(
-                generate_color_preview,
-                red=red,
-                green=green,
-                blue=blue,
-                target=TargetPosition(ra, dec),
-                size=size,
-                output_dir=output_dir,
-            )
-        except InvalidQueryError as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=e,
-            )
+        task_uid = uuid.uuid4().hex[:12]
+        async_result = execute_color_preview.apply_async(
+            kwargs={
+                "red": red,
+                "green": green,
+                "blue": blue,
+                "target": TargetPosition(ra, dec),
+                "size": size,
+                "output_dir": output_dir,
+            },
+            task_id=f"sync-color-{job_id}-{task_uid}",
+            priority=0,
+        )
+        ret = await _wait_for_result(async_result, timeout=CONFIG.redis.timeout)
+        ret = CutoutResponse.model_validate(ret)
 
         if CONFIG.storage.is_s3:
             fs: AbstractFileSystem = filesystem("s3")

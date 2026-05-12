@@ -71,7 +71,7 @@ class CutoutResults:
                 "size_px": r.size_px,
                 "filter": r.filter,
                 "mission_extras": json.dumps(r.mission_extras),
-                "fits": r.fits,
+                "fits": r.science,
                 "preview": r.preview,
             }
             for r in results

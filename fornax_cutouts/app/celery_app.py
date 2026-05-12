@@ -35,7 +35,11 @@ conf_update = {
     # Redis Options
     "broker_transport_options": {
         "global_keyprefix": f"{CONFIG.worker.redis_prefix}:celery:broker:",
+        "queue_order_strategy": "priority",
+        "priority_steps": list(range(3)),
+        "sep": ":",
     },
+    "task_default_priority": 1,
     "result_backend_transport_options": {
         "global_keyprefix": f"{CONFIG.worker.redis_prefix}:celery:results:",
     },

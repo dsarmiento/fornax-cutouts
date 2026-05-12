@@ -33,7 +33,7 @@ class CutoutRegistry:
             module = module_from_spec(spec)
             spec.loader.exec_module(module)
 
-        self.logger.info(f"Registered sources: {self.get_source_names()}")
+        self.logger.debug(f"Registered sources: {self.get_source_names()}")
 
     def get_source_names(self) -> list[str]:
         return self._VALID_SOURCES
@@ -76,14 +76,12 @@ class CutoutRegistry:
         position: Positions,
         mission_params: dict[str, dict],
         size: int | None = None,
-        include_metadata: bool = True,
     ) -> list[FilenameLookupResponse]:
         ret = []
 
         for mission, params in mission_params.items():
             filenames = self.get_mission(mission).get_filenames(
                 position=position,
-                include_metadata=include_metadata,
                 **params,
             )
 
