@@ -6,7 +6,7 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import Positions, TargetPosition
 
 ENVIRONMENT_PREFIX = CONFIG.deployment_environment if CONFIG.deployment_environment not in ["int", "ops"] else ""
-SANTA_QUERY_URI = f"https://{ENVIRONMENT_PREFIX}mastresolver.stsci.edu/Santa-war"
+SANTA_QUERY_URI = "https://mastresolver.stsci.edu/Santa-war"
 
 
 class SantaResolver:
