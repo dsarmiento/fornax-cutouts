@@ -29,14 +29,16 @@ class SantaResolver:
 
             santa_resp.raise_for_status()
 
-        except Exception:
+        except Exception as e:
+            print(f"Error resolving targets: {e}")
             return {}
 
         try:
             resolved_points_json = santa_resp.json()["resolvedCoordinate"]
             resolved_points = [SantaResolvedCoordinate.from_dict(d) for d in resolved_points_json]
 
-        except Exception:
+        except Exception as e:
+            print(f"Error parsing Santa response: {e}")
             return {}
 
         return {p.searchString: TargetPosition(p.ra, p.dec) for p in resolved_points}
