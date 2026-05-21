@@ -2,11 +2,9 @@ from dataclasses import dataclass
 
 import httpx
 
-from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import Positions, TargetPosition
 
-ENVIRONMENT_PREFIX = CONFIG.deployment_environment if CONFIG.deployment_environment not in ["int", "ops"] else ""
-SANTA_QUERY_URI = f"https://{ENVIRONMENT_PREFIX}mastresolver.stsci.edu/Santa-war"
+SANTA_QUERY_URI = "https://mastresolver.stsci.edu/Santa-war"
 
 
 class SantaResolver:
@@ -29,14 +27,16 @@ class SantaResolver:
 
             santa_resp.raise_for_status()
 
-        except Exception:
+        except Exception as e:
+            print(f"Error resolving targets: {e}")
             return {}
 
         try:
             resolved_points_json = santa_resp.json()["resolvedCoordinate"]
             resolved_points = [SantaResolvedCoordinate.from_dict(d) for d in resolved_points_json]
 
-        except Exception:
+        except Exception as e:
+            print(f"Error parsing Santa response: {e}")
             return {}
 
         return {p.searchString: TargetPosition(p.ra, p.dec) for p in resolved_points}
