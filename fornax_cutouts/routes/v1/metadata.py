@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Query, status
+from fastapi import APIRouter, Body, HTTPException, status
 from fastapi_utils.cbv import cbv
 
 from fornax_cutouts.models.metadata import FilenameRequest
@@ -109,10 +109,3 @@ class MetadataHandler:
             "total_files": sum(len(fname_response.filenames) for fname_response in fnames),
             "filenames": fnames,
         }
-
-    @metadata_router.get("/resolve")
-    def resolve_positions(
-        self,
-        position: Annotated[list[str], Query()],
-    ):
-        return resolve_positions(position)
