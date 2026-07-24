@@ -92,35 +92,66 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-## Infrastructure Architecture
+## Architecture
+
+### Cloud Infrastructure
 
 ```mermaid
 architecture-beta
     service internet(internet)[Internet]
 
-    group fornax(cloud)[Fornax Cutouts]
+    group cloud(cloud)[Cloud IaC]
+    group fornax(server)[Fornax Cutouts] in cloud
 
-    service gateway(internet)[Gateway] in fornax
-    service load_balancer(server)[Load Balancer] in fornax
+    service gateway(internet)[Gateway] in cloud
+    service load_balancer(server)[Load Balancer] in cloud
 
     service api(server)[REST API] in fornax
     service worker(server)[Celery Workers] in fornax
 
-    service redis(database)[Redis] in fornax
-    service s3(disk)[Storage] in fornax
+    service redis(database)[Redis] in cloud
+    service s3(disk)[Storage] in cloud
 
     internet:R -- L:gateway
     gateway:R -- L:load_balancer
     load_balancer:B -- T:api
     api:B -- T:worker
 
-    junction j1 in fornax
+    junction j1 in cloud
     redis:B -- T:j1
 
     redis:R -- L:api
     j1:R -- L:worker
 
     s3:L -- R:worker
+```
+
+### User sequence
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant R as REST API
+    participant C as Cutouts
+    participant RD as Redis
+
+    U->>+R: Request cutout
+    R->>RD: Add request to queue
+    R->>-U: Request Ack + Job ID
+
+    par For each cutout
+        RD->>+C: Perform cutout
+        C->>-RD: Write results
+    end
+
+    loop Poll job status for complete
+        U->>+R: Request job status
+        RD->>R: .
+        R->>-U: .
+    end
+
+    U->>+R: Get cutout results
+    R->>-U: .
 ```
 
 ## Issues
