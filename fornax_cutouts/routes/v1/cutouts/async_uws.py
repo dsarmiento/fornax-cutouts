@@ -19,6 +19,7 @@ from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, a
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
 from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError
 from fornax_cutouts.utils.html_link import html_link
 from fornax_cutouts.utils.logging import get_logger
 
@@ -183,10 +184,10 @@ class CutoutsUWSHandler:
             job_summary = await uws_job.get_job_summary(base_url=request.url)
             return XmlResponse(job_summary.to_xml())
 
-        except TypeError:
+        except CutoutJobNotFoundError as e:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Cutout job {job_id!r} not found.",
+                detail=str(e),
             )
 
     @uws_router.delete(

@@ -273,7 +273,7 @@ def batch_watchdog(self: Task, job_id: str, batch_num: int, expected_count: int)
         return
 
     logger.warning(
-        f"Job {job_id} batch {batch_num}: watchdog recovering stalled batch (outstanding={outstanding})",
+        f"Job {job_id} watchdog {batch_num}: recovering stalled batch (outstanding={outstanding})",
         extra={
             "event": "batch_watchdog_recover",
             "job_id": job_id,
@@ -367,8 +367,14 @@ def write_results(self: Task, job_id: str, batch_num: int):
 
         failed_in_batch = sum(1 for x in results if x is None)
 
+        log_message = f"Job {job_id} write results {batch_num}: {len(cutout_results)} cutout(s) succeeded, {failed_in_batch} missing/null."
+        if job_complete:
+            log_message += " Job complete."
+        else:
+            log_message += f" {pending_tasks} pending task(s), queuing next batch {next_batch}."
+
         logger.info(
-            f"Job {job_id} batch {batch_num}: results: {len(cutout_results)} succeeded, {failed_in_batch} missing/null",
+            log_message,
             extra={
                 "event": "batch_results_written",
                 "job_id": job_id,
@@ -384,6 +390,7 @@ def write_results(self: Task, job_id: str, batch_num: int):
                 "total_s": round(update_job_time - start_time, 4),
             },
         )
+
         logger.debug(
             f"Job {job_id} batch results timings",
             extra={
@@ -398,6 +405,7 @@ def write_results(self: Task, job_id: str, batch_num: int):
                 },
             },
         )
+
     finally:
         r.delete_batch_keys(batch_num)
 
@@ -533,7 +541,7 @@ def generate_cutout(  # noqa: C901
         timings_s["preview_write"] = round(jpg_write_time - fits_write_time, 4)
 
     logger.info(
-        f"Cutout generated: job {job_id} - mission='{mission}' source='{source_file}' size={size[0]}x{size[1]}px",
+        f"Job {job_id} cutout generated: mission='{mission}' source='{source_file}' size={size[0]}x{size[1]}px",
         extra={
             "event": "cutout_generated",
             "job_id": job_id,
@@ -554,7 +562,7 @@ def generate_cutout(  # noqa: C901
         },
     )
     logger.debug(
-        f"Cutout generated timings: job {job_id} - mission='{mission}'",
+        f"Job {job_id} cutout generated timings: mission='{mission}'",
         extra={
             "event": "cutout_generated_timings",
             "job_id": job_id,
@@ -717,7 +725,7 @@ def execute_color_preview(
     pydantic=True,
     queue="cutouts",
 )
-def execute_cutout(
+def execute_cutout(  # noqa: C901
     self: Task,
     job_id: str,
     source_file: str,
@@ -748,7 +756,7 @@ def execute_cutout(
         batch_num (int): Async batch identifier; 0 for non-batched (e.g. sync) tasks.
         increment_id (int): Index within the batch for Redis aggregation.
     """
-    is_sync = job_id == "sync"
+    is_async = job_id != "sync"
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
     if isinstance(size, int):
@@ -756,8 +764,9 @@ def execute_cutout(
 
     resp = None
     r: SyncRedisCutoutJob | None = None
+    remaining = None
 
-    if not is_sync:
+    if is_async:
         r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
         r.start_task(batch_num, increment_id)
 
@@ -774,8 +783,11 @@ def execute_cutout(
         )
 
     except astrocut.exceptions.InvalidQueryError:
+        if is_async:
+            remaining = r.skip_task(batch_num, increment_id)
+
         logger.info(
-            f"Cutout skipped (cutout has no data): job {job_id} - mission='{mission}' source='{source_file}'",
+            f"Job {job_id} cutout skipped (cutout has no data): mission='{mission}' source='{source_file}'",
             extra={
                 "event": "cutout_skipped",
                 "job_id": job_id,
@@ -792,13 +804,12 @@ def execute_cutout(
                 },
             },
         )
-        if not is_sync:
-            r.skip_task(batch_num)
-        return None
 
     except Exception as e:
-        if not is_sync:
-            r.fail_task(
+        if not is_async:
+            remaining = r.fail_task(
+                batch_num=batch_num,
+                increment_id=increment_id,
                 task_kwargs={
                     "job_id": job_id,
                     "source_file": source_file,
@@ -811,8 +822,9 @@ def execute_cutout(
                 },
                 error_message=str(e),
             )
+
         logger.warning(
-            f"Cutout failed for job {job_id}: {e!r}",
+            f"Job {job_id} cutout failed: {e!r}",
             extra={
                 "event": "cutout_failed",
                 "job_id": job_id,
@@ -825,20 +837,21 @@ def execute_cutout(
             },
             exc_info=True,
         )
-        return None
 
-    finally:
-        if not is_sync:
+    else:
+        if is_async:
             result_payload = resp.model_dump_json() if resp is not None else None
             remaining = r.complete_task(batch_num, increment_id, result_payload)
-            if remaining == 0:
-                celery_app.control.revoke(
-                    BATCH_WATCHDOG_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
-                    terminate=False,
-                )
-                write_results.apply_async(
-                    kwargs={"job_id": job_id, "batch_num": batch_num},
-                    task_id=WRITE_RESULTS_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
-                )
+
+    finally:
+        if is_async and remaining is not None and remaining <= 0:
+            celery_app.control.revoke(
+                BATCH_WATCHDOG_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
+                terminate=False,
+            )
+            write_results.apply_async(
+                kwargs={"job_id": job_id, "batch_num": batch_num},
+                task_id=WRITE_RESULTS_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
+            )
 
     return resp

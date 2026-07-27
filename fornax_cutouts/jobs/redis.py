@@ -18,6 +18,7 @@ from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, Parameters, S
 
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.uws import create_job_summary, create_parameters
+from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError
 from fornax_cutouts.utils.pagination import get_pagination_metadata
 
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
@@ -267,10 +268,15 @@ class AsyncRedisCutoutJob:
             await pipe.execute()
 
     async def get_job_summary(self, base_url: str = "") -> JobSummary:
-        job_json: dict = await self.__redis_client.json().get(self.__keys.uws)
+        job_json: dict | None = await self.__redis_client.json().get(self.__keys.uws)
+
+        if not job_json:
+            raise CutoutJobNotFoundError(self.job_id)
+
         job_json.pop("results", None)
         if base_url:
             job_json["parameters"]["position"] = f"{base_url}/parameters/position"
+
         return create_job_summary(**job_json)
 
     async def get_job_result_status(self):
@@ -478,7 +484,7 @@ class SyncRedisCutoutJob:
 
     def get_batch_results(self, batch_num: int) -> list[Any]:
         results = self.__redis_client.hgetall(self.__keys.batch_results(batch_num))
-        return [json.loads(raw) for raw in results]
+        return [json.loads(raw) for raw in results.values()]
 
     # Task operations
 
@@ -489,21 +495,26 @@ class SyncRedisCutoutJob:
             pipe.incr(self.__keys.executing_task_count)
             pipe.execute()
 
-    def skip_task(self, batch_num: int):
+    def skip_task(self, batch_num: int, increment_id: int) -> int:
         with self.__redis_client.pipeline() as pipe:
-            pipe.decr(self.__keys.executing_task_count)
+            pipe.hset(self.__keys.batch_results(batch_num), str(increment_id), "null")
             pipe.decr(self.__keys.batch_outstanding(batch_num))
+            pipe.decr(self.__keys.executing_task_count)
             pipe.incr(self.__keys.skipped_task_count)
-            pipe.execute()
+            _, remaining, _, _ = pipe.execute()
+        return int(remaining) if remaining else 0
 
-    def fail_task(self, task_kwargs: dict, error_message: str):
+    def fail_task(self, batch_num: int, increment_id: int, task_kwargs: dict, error_message: str) -> int:
         task_kwargs["error_message"] = error_message
         with self.__redis_client.pipeline() as pipe:
-            pipe.rpush(self.__keys.failed_tasks, json_dumps_with_encoders(task_kwargs))
+            pipe.hset(self.__keys.batch_results(batch_num), str(increment_id), "null")
+            pipe.decr(self.__keys.batch_outstanding(batch_num))
             pipe.decr(self.__keys.executing_task_count)
-            pipe.execute()
+            pipe.rpush(self.__keys.failed_tasks, json_dumps_with_encoders(task_kwargs))
+            _, remaining, _, _ = pipe.execute()
+        return int(remaining) if remaining else 0
 
-    def complete_task(self, batch_num: int, increment_id: int, result_json: str):
+    def complete_task(self, batch_num: int, increment_id: int, result_json: str) -> int:
         with self.__redis_client.pipeline() as pipe:
             pipe.hset(self.__keys.batch_results(batch_num), str(increment_id), result_json)
             pipe.decr(self.__keys.batch_outstanding(batch_num))
