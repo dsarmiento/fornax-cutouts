@@ -1,8 +1,10 @@
 import os
+import signal
 import ssl
 
 from celery import Celery
 from celery.signals import setup_logging, worker_process_init, worker_process_shutdown
+from celery.worker import state as celery_worker_state
 from redis import Redis, RedisCluster
 
 from fornax_cutouts.config import CONFIG
@@ -46,6 +48,7 @@ conf_update = {
     "result_expires": 1 * 60 * 60,  # 1 Hour,
     # Worker memory management
     "task_acks_late": True,
+    "task_reject_on_worker_lost": True,
     "worker_prefetch_multiplier": CONFIG.worker.prefetch_multiplier,
     "worker_max_tasks_per_child": CONFIG.worker.max_tasks_per_child,
 }
@@ -68,6 +71,29 @@ def configure_logging(**kwargs):
     setup_worker_logging()
 
 
+def _register_worker_sigterm_handler():
+    """Reject reserved tasks before ECS SIGKILL."""
+
+    def handle_sigterm(signum, frame):
+        num_reserved_tasks = len(celery_worker_state.reserved_requests)
+        if num_reserved_tasks > 0:
+            try:
+                logger.warning(
+                    f"SIGTERM received: requeueing ({num_reserved_tasks}) reserved tasks and exiting worker child",
+                    extra={"event": "worker_sigterm", "num_reserved_tasks": num_reserved_tasks},
+                )
+                for req in list(celery_worker_state.reserved_requests):
+                    try:
+                        req.reject(requeue=True)
+                    except Exception as e:
+                        logger.error(f"Failed to reject reserved task during SIGTERM: {e}")
+            except Exception as e:
+                logger.error(f"SIGTERM handler error: {e}")
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
+
 @worker_process_init.connect
 def setup_worker_process(**kwargs):
     cutout_registry.discover_sources()
@@ -77,6 +103,8 @@ def setup_worker_process(**kwargs):
 
     _monkey_patch_astrocut()
     logger.debug("Astrocut monkey patch complete")
+
+    _register_worker_sigterm_handler()
 
 
 @worker_process_shutdown.connect
