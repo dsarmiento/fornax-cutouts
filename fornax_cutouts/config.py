@@ -60,6 +60,12 @@ class LoggingConfig(BaseModel):
     format: str = "text"  # "text" or "json"
 
 
+class CutoutLimitConfig(BaseModel):
+    enabled: bool = True
+    anon_cutout_limit: int = 10
+    window_seconds: int = 30
+
+
 class FornaxCutoutsConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="cutouts__",
@@ -75,6 +81,7 @@ class FornaxCutoutsConfig(BaseSettings):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
     log: LoggingConfig = Field(default_factory=LoggingConfig)
+    cutout_limit: CutoutLimitConfig = Field(default_factory=CutoutLimitConfig)
 
     sync_ttl: int = 1 * 60 * 60  # 1 Hour
     # async_ttl: int = 2 * 7 * 24 * 60 * 60  # 2 Weeks (not currently used)

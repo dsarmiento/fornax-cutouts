@@ -12,14 +12,17 @@ from astropy.io.fits.hdu.hdulist import HDUList
 from celery import Task
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
+from vo_models.uws.types import ErrorType
 
 from fornax_cutouts.app.celery_app import celery_app, get_pool_size_for_queue, logger, redis_client_factory
+from fornax_cutouts.auth.limits import CutoutLimiter
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import SyncRedisCutoutJob
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse
 from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.utils.exceptions import CutoutLimitExceededError
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 STRETCH = "asinh"  # "sinh"
@@ -45,6 +48,9 @@ def schedule_job(
 ):
     start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
+    limiter = CutoutLimiter(redis_client_factory())
+    cutout_limit_identity, cutout_limit_max, cutout_limit_window_seconds = r.get_cutout_limit_budget()
+    logger.debug(f"Cutout limit identity: {cutout_limit_identity} limit: {cutout_limit_max}")
 
     job_parameters = r.get_job_parameters()
     size = job_parameters.pop("size")
@@ -111,6 +117,13 @@ def schedule_job(
         num_jobs = len(descriptors)
 
         if num_jobs == 0:
+            limiter.reconcile(
+                identity=cutout_limit_identity,
+                job_id=job_id,
+                actual=0,
+                cutout_limit=cutout_limit_max,
+                window_seconds=cutout_limit_window_seconds,
+            )
             r.start_job()
             r.complete_job()
             del target_fnames, descriptors, resolved_positions
@@ -128,6 +141,27 @@ def schedule_job(
     push_pending_tasks_time = time.perf_counter()
     r.set_total_task_count(total_jobs)
     r.increment_total_pending_tasks(total_jobs)
+    try:
+        limiter.reconcile(
+            identity=cutout_limit_identity,
+            job_id=job_id,
+            actual=total_jobs,
+            cutout_limit=cutout_limit_max,
+            window_seconds=cutout_limit_window_seconds,
+        )
+    except CutoutLimitExceededError as exc:
+        r.fail_job(str(exc), ErrorType.TRANSIENT)
+        logger.warning(
+            f"Job {job_id} failed on reconcile: cutout count {total_jobs} exceeds identity's cutout limit",
+            extra={
+                "event": "job_failed_cutout_limit_reconcile",
+                "job_id": job_id,
+                "identity": cutout_limit_identity,
+                "actual": total_jobs,
+                "limit": cutout_limit_max,
+            },
+        )
+        return
 
     metadata_update_time = time.perf_counter()
 

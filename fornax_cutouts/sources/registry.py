@@ -1,10 +1,8 @@
 import logging
 from dataclasses import dataclass, field
 from functools import cached_property
-from importlib.util import module_from_spec, spec_from_file_location
 from typing import TypeVar
 
-from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import Positions
 from fornax_cutouts.models.cutouts import FilenameLookupResponse
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
@@ -29,14 +27,6 @@ class CutoutRegistry:
             return cls
 
         return _decorator
-
-    def discover_sources(self):
-        for source in CONFIG.source_path.glob("**/*.py"):
-            spec = spec_from_file_location(f"cutouts_source_{source.name}", source.as_posix())
-            module = module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-        self.logger.debug(f"Registered sources: {self.get_source_names()}")
 
     def get_source_names(self) -> list[str]:
         return self._VALID_SOURCES
