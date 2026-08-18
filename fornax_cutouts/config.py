@@ -63,7 +63,8 @@ class LoggingConfig(BaseModel):
 class CutoutLimitConfig(BaseModel):
     enabled: bool = True
     anon_cutout_limit: int = 10
-    window_seconds: int = 30
+    window_seconds: int = 60
+    principal_resolver: Path | None = None
 
 
 class FornaxCutoutsConfig(BaseSettings):

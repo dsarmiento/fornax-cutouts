@@ -123,7 +123,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             "job_id": job_id,
             "request": request_block,
         }
-        log_line = f"{request.method} {request.url.path} ({request_block['client_ip']})"
+        log_line = f"### {request.method} {request.url.path} ({request_block['client_ip']})"
         logger.debug(log_line, extra=request_data)
 
         try:

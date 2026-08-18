@@ -1,7 +1,7 @@
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from functools import cached_property
+from typing import TypeVar
 
 from starlette.requests import Request
 
@@ -12,26 +12,23 @@ from fornax_cutouts.utils.logging import get_logger
 from fornax_cutouts.utils.middleware import client_ip_from_request
 
 _UNKNOWN_CLIENT_BUCKET = "unknown"
+_AuthProviderT = TypeVar("_AuthProviderT", bound=type[AbstractAuthProvider])
 
 
 @dataclass
 class AuthRegistry:
-    _PROVIDERS: dict[str, AbstractAuthProvider] = field(default_factory=dict, init=False)
+    _provider: AbstractAuthProvider | None = field(default=None, init=False)
     logger: logging.Logger = field(default_factory=get_logger, init=False)
 
-    @cached_property
-    def _PROVIDER_NAMES(self) -> list[str]:
-        return sorted(self._PROVIDERS.keys())
+    def register_provider(self, cls: _AuthProviderT) -> _AuthProviderT:
+        if self._provider is not None:
+            raise RuntimeError(
+                f"Auth provider already registered: {self._provider.name}. Only one provider can be registered."
+            )
 
-    def register_provider(self):
-        def _decorator(cls: AbstractAuthProvider) -> AbstractAuthProvider:
-            self._PROVIDERS[cls.name] = cls()
-            return cls
-
-        return _decorator
-
-    def get_provider_names(self) -> list[str]:
-        return self._PROVIDER_NAMES
+        self._provider = cls()
+        self.logger.info(f"Registered {self._provider.name} as the authz provider")
+        return cls
 
     def _anonymous_principal(self, request: Request) -> Principal:
         client_ip = client_ip_from_request(request)
@@ -45,22 +42,21 @@ class AuthRegistry:
     async def resolve_principal(self, request: Request) -> Principal:
         """Resolve the Principal for a request.
 
-        Providers registered via `register_provider()` are tried in sorted-name order
-        (deterministic regardless of filesystem discovery order); the first one to return
-        a non-None Principal wins. A provider that raises is logged and skipped so a broken
-        auth backend degrades to the anonymous limit rather than failing the request. Falls
-        back to an IP-derived anonymous Principal when no provider claims the request.
+        When a provider is registered via `register_provider()`, it is consulted first.
+        A provider that raises is logged and skipped so a broken auth backend degrades to
+        the anonymous limit rather than failing the request. Falls back to an IP-derived
+        anonymous Principal when no provider is registered or the provider returns None.
         """
-        for name in self._PROVIDER_NAMES:
+        if self._provider is not None:
+            principal = None
             try:
-                principal = await self._PROVIDERS[name].resolve(request)
+                principal = await self._provider.resolve(request)
             except Exception as e:
                 self.logger.error(
-                    f"Auth provider {name!r} failed to resolve principal: {e}",
-                    extra={"event": "auth_provider_error", "provider": name, "error": str(e)},
+                    f"Auth provider {self._provider.name!r} failed to resolve principal: {e}",
+                    extra={"event": "auth_provider_error", "provider": self._provider.name, "error": str(e)},
                     exc_info=True,
                 )
-                continue
 
             if principal is not None:
                 return principal

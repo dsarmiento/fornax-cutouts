@@ -62,14 +62,13 @@ return {1, used, 0}
 """
 
 # KEYS: 1=events (zset), 2=counts (hash)
-# ARGV: 1=job_id, 2=actual_count, 3=limit ('' if the principal is unlimited), 4=window_seconds,
-#       5=now
+# ARGV: 1=job_id, 2=actual_count, 3=limit ('' if the principal is unlimited)
 # Only updates the count if the job's reservation is still within the window; a job that
 # already rolled off the window must not resurrect a stale entry (returns allowed=1, a no-op,
 # in that case). When `actual` is higher than what was reserved and a limit applies, re-checks
 # the identity's current usage (excluding this job's own reservation) against the limit before
-# admitting the increase; rejects (allowed=0) and leaves the old reservation untouched if it
-# would exceed the limit, so the caller can raise rather than silently over-run the budget.
+# admitting the increase. Rejecting (allowed=0) also drops the job's reservation, since the
+# caller fails the job on rejection and it will never consume the budget it reserved.
 _RECONCILE_SCRIPT = """
 local events_key = KEYS[1]
 local counts_key = KEYS[2]
@@ -95,8 +94,9 @@ if limit ~= '' then
         end
 
         if used + actual > limit then
-            local window = tonumber(ARGV[4])
-            local now = tonumber(ARGV[5])
+            redis.call('ZREM', events_key, job_id)
+            redis.call('HDEL', counts_key, job_id)
+
             local oldest = redis.call('ZRANGE', events_key, 0, 0, 'WITHSCORES')
             local oldest_score = 0
             if #oldest > 0 then
@@ -196,8 +196,9 @@ class CutoutLimiter:
         No-op if the job's reservation already rolled off the rolling window. If `actual` is
         higher than what was reserved and `cutout_limit` is set, re-checks the identity's
         current usage against the limit before admitting the increase; raises
-        `CutoutLimitExceededError` (leaving the old reservation untouched) if it would
-        exceed the limit, rather than letting the overage silently spill into future requests.
+        `CutoutLimitExceededError` if it would exceed the limit, rather than letting the
+        overage silently spill into future requests. The reservation is refunded on
+        rejection, since the caller fails the job instead of running it.
         """
         keys = CutoutLimitKeys(identity=identity)
         window = window_seconds or CONFIG.cutout_limit.window_seconds
@@ -205,7 +206,7 @@ class CutoutLimiter:
 
         allowed, used, oldest_score = self._reconcile_script(
             keys=[keys.events, keys.counts],
-            args=[job_id, actual, cutout_limit if cutout_limit is not None else "", window, now],
+            args=[job_id, actual, cutout_limit if cutout_limit is not None else ""],
         )
 
         if not allowed:

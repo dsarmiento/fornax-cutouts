@@ -20,13 +20,10 @@ class CutoutRegistry:
     def _VALID_SOURCES(self) -> list[str]:
         return sorted(self._SOURCES.keys())
 
-    def register_source(self):
-        def _decorator(cls: type[_MissionSourceT]) -> type[_MissionSourceT]:
-            mission_name = cls.metadata.name
-            self._SOURCES[mission_name] = cls()
-            return cls
-
-        return _decorator
+    def register_source(self, cls: type[_MissionSourceT]) -> type[_MissionSourceT]:
+        self._SOURCES[cls.metadata.name] = cls()
+        self.logger.info(f"Registered {cls.metadata.name} as a mission source")
+        return cls
 
     def get_source_names(self) -> list[str]:
         return self._VALID_SOURCES
