@@ -18,6 +18,7 @@ from redis.commands.search.query import Query
 from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, Parameters, ShortJobDescription
 from vo_models.uws.types import ErrorType
 
+from fornax_cutouts.auth.registry import _UNKNOWN_CLIENT_BUCKET
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.uws import create_job_summary, create_parameters
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError
@@ -273,7 +274,7 @@ class AsyncRedisCutoutJob:
         self,
         run_id: str | None = None,
         parameters: dict = {},
-        identity: str | None = None,
+        identity: str = _UNKNOWN_CLIENT_BUCKET,
         cutout_limit: int | None = None,
         window_seconds: int | None = None,
     ):
