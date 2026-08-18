@@ -20,6 +20,9 @@ from fornax_cutouts.utils.logging import get_logger
 # used + requested <= limit. Reservation (ZADD + HSET) happens atomically with the check so
 # concurrent requests can't both slip under the cap.
 _RESERVE_SCRIPT = """
+-- Rolling-window cutout budget: events ZSET tracks job admission times (score = timestamp),
+-- counts HASH maps job_id -> reserved/actual cutout count for jobs still in the window.
+
 local events_key = KEYS[1]
 local counts_key = KEYS[2]
 local job_id = ARGV[1]
@@ -28,6 +31,7 @@ local window = tonumber(ARGV[3])
 local limit = tonumber(ARGV[4])
 local requested = tonumber(ARGV[5])
 
+-- Drop reservations that fell outside the rolling window.
 local cutoff = now - window
 local expired = redis.call('ZRANGEBYSCORE', events_key, '-inf', cutoff)
 if #expired > 0 then
@@ -37,12 +41,14 @@ if #expired > 0 then
     end
 end
 
+-- Sum cutouts currently reserved across all in-window jobs.
 local used = 0
 local counts = redis.call('HVALS', counts_key)
 for _, v in ipairs(counts) do
     used = used + tonumber(v)
 end
 
+-- Reject if this request would exceed the limit; return oldest event time for retry-after.
 if used + requested > limit then
     local oldest = redis.call('ZRANGE', events_key, 0, 0, 'WITHSCORES')
     local oldest_score = 0
@@ -52,6 +58,7 @@ if used + requested > limit then
     return {0, used, oldest_score}
 end
 
+-- Admit: record job in the window and reserve its cutout count atomically.
 redis.call('ZADD', events_key, now, job_id)
 redis.call('HSET', counts_key, job_id, requested)
 local ttl = window * 2
@@ -70,12 +77,15 @@ return {1, used, 0}
 # admitting the increase. Rejecting (allowed=0) also drops the job's reservation, since the
 # caller fails the job on rejection and it will never consume the budget it reserved.
 _RECONCILE_SCRIPT = """
+-- Worker-side: update a job's reserved count to the true cutout count after processing.
+
 local events_key = KEYS[1]
 local counts_key = KEYS[2]
 local job_id = ARGV[1]
 local actual = tonumber(ARGV[2])
-local limit = ARGV[3]
+local limit = ARGV[3]  -- empty string means unlimited
 
+-- Reservation already expired from the window; nothing to reconcile.
 if redis.call('ZSCORE', events_key, job_id) == false then
     return {1, 0, 0}
 end
@@ -84,6 +94,7 @@ if limit ~= '' then
     limit = tonumber(limit)
     local old = tonumber(redis.call('HGET', counts_key, job_id)) or 0
 
+    -- Only re-check the limit when actual usage exceeds what was reserved.
     if actual > old then
         local used = 0
         local counts = redis.call('HGETALL', counts_key)
@@ -93,6 +104,7 @@ if limit ~= '' then
             end
         end
 
+        -- Over limit: drop this job's reservation and reject (caller will fail the job).
         if used + actual > limit then
             redis.call('ZREM', events_key, job_id)
             redis.call('HDEL', counts_key, job_id)
@@ -114,6 +126,7 @@ return {1, 0, 0}
 # KEYS: 1=events (zset), 2=counts (hash)
 # ARGV: 1=job_id
 _RELEASE_SCRIPT = """
+-- Refund a reservation when job creation fails after a successful reserve.
 redis.call('ZREM', KEYS[1], ARGV[1])
 redis.call('HDEL', KEYS[2], ARGV[1])
 return 1
