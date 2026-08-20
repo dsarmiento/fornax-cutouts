@@ -123,6 +123,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             "job_id": job_id,
             "request": request_block,
         }
+        logger.debug(f"x-forwarded-for: {request.headers.get('x-forwarded-for')}")
+        logger.debug(f"x-real-ip: {request.headers.get('x-real-ip')}")
         log_line = f"### {request.method} {request.url.path} ({request_block['client_ip']})"
         logger.debug(log_line, extra=request_data)
 
