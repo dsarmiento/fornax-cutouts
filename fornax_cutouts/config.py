@@ -84,6 +84,8 @@ class FornaxCutoutsConfig(BaseSettings):
     log: LoggingConfig = Field(default_factory=LoggingConfig)
     cutout_limit: CutoutLimitConfig = Field(default_factory=CutoutLimitConfig)
 
+    num_trusted_proxies: int = Field(default=0, ge=0)
+
     sync_ttl: int = 1 * 60 * 60  # 1 Hour
     # async_ttl: int = 2 * 7 * 24 * 60 * 60  # 2 Weeks (not currently used)
 

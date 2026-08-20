@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from fornax_cutouts.config import CONFIG
 from fornax_cutouts.utils.logging import get_logger
 
 # UWS async routes: /api/v#/cutouts/async/{job_id}/...
@@ -23,17 +24,28 @@ def job_id_from_request_path(path: str) -> str | None:
 
 
 def client_ip_from_request(request: Request) -> str | None:
-    """Best-effort original client IP (e.g. behind ALB); falls back to the TCP peer."""
+    """
+    Best-effort original client IP, accounting for trusted reverse proxies.
+
+    With takes the rightmost IP in X-Forwarded-For after skipping N proxy-appended entries.
+    This prevents clients from spoofing their IP by injecting their own XFF header values at the front of the list.
+
+    Falls back to X-Real-IP, then the raw TCP peer address.
+    """
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
-        first = forwarded_for.split(",")[0].strip()
-        if first:
-            return first
+        ips = [ip.strip() for ip in forwarded_for.split(",")]
+        idx = -(CONFIG.num_trusted_proxies + 1)
+        candidate = ips[idx] if len(ips) >= abs(idx) else ips[-1]
+        if candidate:
+            return candidate
+
     real_ip = request.headers.get("x-real-ip")
     if real_ip:
         stripped = real_ip.strip()
         if stripped:
             return stripped
+
     return request.client.host if request.client else None
 
 
@@ -123,8 +135,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             "job_id": job_id,
             "request": request_block,
         }
-        logger.debug(f"x-forwarded-for: {request.headers.get('x-forwarded-for')}")
-        logger.debug(f"x-real-ip: {request.headers.get('x-real-ip')}")
         log_line = f"### {request.method} {request.url.path} ({request_block['client_ip']})"
         logger.debug(log_line, extra=request_data)
 
