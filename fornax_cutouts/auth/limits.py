@@ -19,10 +19,28 @@ _LUA_DIR = files("fornax_cutouts.auth") / "lua"
 
 
 def _load_lua(name: str) -> str:
+    """
+    Load a Lua script from the given name.
+
+    Args:
+        name (str): The name of the script to load
+
+    Returns:
+        str: The loaded Lua script
+    """
     return (_LUA_DIR / name).read_text(encoding="utf-8")
 
 
 def _compose_lua(name: str) -> str:
+    """
+    Compose a Lua script by concatenating the library and the given script.
+
+    Args:
+        name (str): The name of the script to compose
+
+    Returns:
+        str: The composed Lua script
+    """
     return _load_lua("_lib.lua") + _load_lua(name)
 
 
@@ -50,8 +68,13 @@ class CutoutLimiter:
         """
         Reserve `requested` cutouts against the principal's rolling-window budget.
 
-        No-op when cutout limiting is disabled or the principal is unlimited. Raises
-        `CutoutLimitExceededError` if the reservation would exceed the limit.
+        Args:
+            principal (Principal): The principal to reserve cutouts against
+            job_id (str): The ID of the job
+            requested (int): The number of cutouts to reserve
+
+        Raises:
+            CutoutLimitExceededError: If the cutout limit is exceeded
         """
         if not CONFIG.cutout_limit.enabled or principal.cutout_limit is None:
             return
@@ -101,14 +124,17 @@ class CutoutLimiter:
         window_seconds: int | None = None,
     ) -> None:
         """
-        Update a reservation to the true cutout count once it's known (sync, worker-side).
+        Update a reservation to the true cutout count once it's known.
 
-        No-op if the job's reservation already rolled off the rolling window. If `actual` is
-        higher than what was reserved and `cutout_limit` is set, re-checks the identity's
-        current usage against the limit before admitting the increase; raises
-        `CutoutLimitExceededError` if it would exceed the limit, rather than letting the
-        overage silently spill into future requests. The reservation is refunded on
-        rejection, since the caller fails the job instead of running it.
+        Args:
+            identity (str): The identity of the principal
+            job_id (str): The ID of the job
+            actual (int): The actual number of cutouts
+            cutout_limit (int | None): The cutout limit
+            window_seconds (int | None): The window seconds
+
+        Raises:
+            CutoutLimitExceededError: If the cutout limit is exceeded
         """
         keys = CutoutLimitKeys(identity=identity)
         window = window_seconds or CONFIG.cutout_limit.window_seconds
@@ -143,4 +169,13 @@ class CutoutLimiter:
 
 
 def cutout_limiter_factory(redis_client: Any) -> CutoutLimiter:
+    """
+    Create a CutoutLimiter instance.
+
+    Args:
+        redis_client (Any): The Redis client to use
+
+    Returns:
+        CutoutLimiter: A CutoutLimiter instance
+    """
     return CutoutLimiter(redis_client)

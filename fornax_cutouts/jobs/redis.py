@@ -278,6 +278,18 @@ class AsyncRedisCutoutJob:
         cutout_limit: int | None = None,
         window_seconds: int | None = None,
     ):
+        """
+        Create a new aysnc cutout job in the Redis database by setting the UWS job object and job metadata.
+        If enabled, set the cutout limit and window seconds.
+
+        Args:
+            run_id (str | None): Optional run ID to associate with the job from the UWS spec.
+            parameters (dict): Dictionary of job parameters, including "position" key (list) for batch tasks.
+            identity (str): Identity string for cutout limit tracking (default: _UNKNOWN_CLIENT_BUCKET).
+            cutout_limit (int | None): Optional maximum number of cutouts allowed within window.
+            window_seconds (int | None): Optional time window (seconds) limiting cutout rate.
+        """
+
         job_obj = {
             "job_id": self.job_id,
             "phase": ExecutionPhase.PENDING,
@@ -288,12 +300,14 @@ class AsyncRedisCutoutJob:
             job_obj["run_id"] = run_id
 
         if parameters:
+            # Extract the positions from the parameters as this can be a large list.
             positions_obj = parameters.pop("position", [])
             parameters["position_count"] = len(positions_obj)
             job_obj["parameters"] = parameters
 
         await self.__update_uws(path="$", obj=job_obj)
 
+        # Push the positions to the Redis positions queue in batches.
         async with self.__redis_client.pipeline() as pipe:
             for idx in range(0, len(positions_obj), POSITIONS_BATCH_SIZE):
                 batch_positions = positions_obj[idx : idx + POSITIONS_BATCH_SIZE]

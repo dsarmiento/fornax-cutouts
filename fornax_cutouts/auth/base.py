@@ -34,5 +34,14 @@ class AbstractAuthProvider(ABC):
 
         Returning None lets the registry fall back to the default anonymous principal
         rather than treating the request as unauthenticated.
+
+        Args:
+            request (Request): The request to resolve a Principal for
+
+        Returns:
+            Principal | None: The resolved Principal, or None if this provider doesn't apply
+
+        Raises:
+            PrincipalResolutionError: If the principal cannot be resolved
         """
         ...

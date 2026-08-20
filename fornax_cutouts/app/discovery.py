@@ -8,23 +8,44 @@ from fornax_cutouts.utils.logging import get_logger
 
 
 def _python_files(path: Path) -> list[Path]:
+    """
+    Glob all Python files in the given directory.
+
+    Args:
+        path (Path): The directory to glob Python files from
+
+    Returns:
+        list[Path]: A sorted list of Python files
+    """
     return sorted(path.glob("**/*.py")) if path.is_dir() else [path]
 
 
 def _exec_module(path: Path, name_prefix: str):
+    """
+    Execute a Python module from the given path.
+
+    Args:
+        path (Path): The path to the Python file
+        name_prefix (str): The prefix to use for the module name
+    """
     spec = spec_from_file_location(f"{name_prefix}_{path.stem}", path.as_posix())
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
 
 
 def discover_sources():
+    """
+    Discover and register cutout sources and authentication providers.
+    """
     logger = get_logger()
 
     loaded = set()
+    # Discover and register cutout sources
     for source in _python_files(CONFIG.source_path):
         _exec_module(source, "cutouts_source")
         loaded.add(source.resolve())
 
+    # Discover and register authentication providers
     resolver_path = CONFIG.cutout_limit.principal_resolver
     if resolver_path is not None:
         if not resolver_path.exists():

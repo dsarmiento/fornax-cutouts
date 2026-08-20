@@ -14,3 +14,10 @@ class CutoutLimitExceededError(Exception):
             f"Cutout limit exceeded: {used} used + at least {requested} requested > {limit} limit "
             f"(retry after {retry_after}s)"
         )
+
+
+class PrincipalResolutionError(Exception):
+    def __init__(self, provider: str, error: str):
+        self.provider = provider
+        self.error = error
+        super().__init__(f"Auth provider {provider} failed to resolve principal: {error}")
