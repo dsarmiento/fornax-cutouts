@@ -61,7 +61,7 @@ class LoggingConfig(BaseModel):
 
 
 class CutoutLimitConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     anon_cutout_limit: int = 10
     window_seconds: int = 60
     principal_resolver: Path | None = None
