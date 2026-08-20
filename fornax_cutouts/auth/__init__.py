@@ -5,7 +5,7 @@ from fornax_cutouts.models.auth import Principal
 auth_registry = AuthRegistry()
 
 __all__ = [
-    AbstractAuthProvider,
-    Principal,
-    auth_registry,
+    "AbstractAuthProvider",
+    "Principal",
+    "auth_registry",
 ]
