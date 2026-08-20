@@ -100,7 +100,8 @@ class CutoutLimiter:
         cutout_limit: int | None = None,
         window_seconds: int | None = None,
     ) -> None:
-        """Update a reservation to the true cutout count once it's known (sync, worker-side).
+        """
+        Update a reservation to the true cutout count once it's known (sync, worker-side).
 
         No-op if the job's reservation already rolled off the rolling window. If `actual` is
         higher than what was reserved and `cutout_limit` is set, re-checks the identity's

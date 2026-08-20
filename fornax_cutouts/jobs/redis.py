@@ -414,7 +414,8 @@ class SyncRedisCutoutJob:
         return job_parameters[0]
 
     def get_cutout_limit_budget(self) -> tuple[str | None, int | None, int | None]:
-        """The (identity, cutout_limit, window_seconds) snapshotted at job creation.
+        """
+        The (identity, cutout_limit, window_seconds) snapshotted at job creation.
 
         `cutout_limit`/`window_seconds` are None when the principal was unlimited (or cutout
         limiting was disabled), signaling the worker doesn't need to recheck on reconcile.
@@ -432,14 +433,19 @@ class SyncRedisCutoutJob:
         )
 
     def scan_job_positions(self) -> Generator[list[str], None, None]:
+        """
+        Scan the job positions in batches of `POSITIONS_BATCH_SIZE`.
+        """
         start = 0
         while True:
             end = start + POSITIONS_BATCH_SIZE - 1
             batch = self.__redis_client.lrange(self.__keys.positions, start, end)
             if not batch:
+                # No more positions to scan.
                 break
             yield batch
             if len(batch) < POSITIONS_BATCH_SIZE:
+                # Last batch is less than `POSITIONS_BATCH_SIZE`; we are done scanning.
                 break
             start += POSITIONS_BATCH_SIZE
 

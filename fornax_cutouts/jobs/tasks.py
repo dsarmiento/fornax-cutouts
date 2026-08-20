@@ -46,6 +46,16 @@ def schedule_job(
     self: Task,
     job_id: str,
 ):
+    """
+    Entrypoint for a new async cutout job.
+      1. Validate mission parameters
+      2. Resolve positions
+      3. Push pending tasks
+      4. Dispatch the first batch
+
+    Args:
+        job_id (str): The ID of the job to schedule
+    """
     start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
     limiter = CutoutLimiter(redis_client_factory())
@@ -75,6 +85,7 @@ def schedule_job(
 
     validated_params = cutout_registry.validate_mission_params(mission_params=mission_params, size=size)
 
+    # Filter out invalid mission parameters.
     valid_mission_params: dict[str, dict] = {}
     for mission, is_valid in validated_params.items():
         if not is_valid:
@@ -89,6 +100,7 @@ def schedule_job(
     total_jobs = 0
     mission_cutout_counts: defaultdict[str, int] = defaultdict(int)
 
+    # Scan the job positions from the Redis list in batches and build the cutout descriptors.
     for positions in r.scan_job_positions():
         resolved_positions = resolve_positions(positions)
 
@@ -114,30 +126,29 @@ def schedule_job(
                 descriptors.append(descriptor)
                 mission_cutout_counts[target_fname.mission] += 1
 
-        num_jobs = len(descriptors)
-
-        if num_jobs == 0:
-            limiter.reconcile(
-                identity=cutout_limit_identity,
-                job_id=job_id,
-                actual=0,
-                cutout_limit=cutout_limit_max,
-                window_seconds=cutout_limit_window_seconds,
-            )
-            r.start_job()
-            r.complete_job()
-            del target_fnames, descriptors, resolved_positions
-            gc.collect()
-            logger.info(
-                f"Job {job_id} completed immediately: no matching source files found",
-                extra={"event": "job_no_cutouts", "job_id": job_id, "missions": list(valid_mission_params.keys())},
-            )
-            return
-
         r.push_pending_tasks(descriptors)
-        total_jobs += num_jobs
+        total_jobs += len(descriptors)
         del target_fnames, descriptors, resolved_positions
 
+    # No matching source files found; complete the job immediately.
+    if total_jobs == 0:
+        limiter.reconcile(
+            identity=cutout_limit_identity,
+            job_id=job_id,
+            actual=0,
+            cutout_limit=cutout_limit_max,
+            window_seconds=cutout_limit_window_seconds,
+        )
+        r.start_job()
+        r.complete_job()
+        gc.collect()  # force garbage collection to free up memory
+        logger.info(
+            f"Job {job_id} completed immediately: no matching source files found",
+            extra={"event": "job_no_cutouts", "job_id": job_id, "missions": list(valid_mission_params.keys())},
+        )
+        return
+
+    # Update the job and and reconcile the cutout limit.
     push_pending_tasks_time = time.perf_counter()
     r.set_total_task_count(total_jobs)
     r.increment_total_pending_tasks(total_jobs)
@@ -165,6 +176,7 @@ def schedule_job(
 
     metadata_update_time = time.perf_counter()
 
+    # Dispatch the first batch.
     batch_num = r.increment_batch_num()
     batch_cutouts.apply_async(
         kwargs={"job_id": job_id, "batch_num": batch_num},
