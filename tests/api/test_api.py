@@ -32,6 +32,8 @@ class FakeSource(AbstractMissionSource):
 
 
 class TestAPIInputFormats:
+    """Test API input formats for the /filenames and /async endpoints"""
+
     client = TestClient(main_app)
 
     @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
