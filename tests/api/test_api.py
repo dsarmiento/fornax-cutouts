@@ -45,7 +45,7 @@ class TestAPIInputFormats:
         mock_instance = mock_job.return_value
         mock_instance.create_job = mock.AsyncMock(return_value="job123")
 
-        # Set up the app for testing
+        # Send a request to the /filenames endpoint
         file_name_request = FilenameRequest(survey=["c"], filter=["a"]).model_dump()
         request_data = {"position": ["m101"], "mission": {"fake_source": file_name_request}}
         response = self.client.post("/api/v0/filenames", json=request_data)
