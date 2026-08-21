@@ -136,6 +136,9 @@ class CutoutLimiter:
         Raises:
             CutoutLimitExceededError: If the cutout limit is exceeded
         """
+        if cutout_limit is None:
+            return
+
         keys = CutoutLimitKeys(identity=identity)
         window = window_seconds or CONFIG.cutout_limit.window_seconds
         now = time.time()

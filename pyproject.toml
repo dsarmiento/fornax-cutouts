@@ -33,6 +33,14 @@ dev = [
     "pytest-cov",
     "ruff>=0.14.1",
 ]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=1.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [project.scripts]
 fornax-cutouts = "fornax_cutouts.cli:main"
