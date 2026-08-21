@@ -59,3 +59,24 @@ class TestAPIInputFormats:
         # Get the job id from the mock and check that we redirected to that location
         job_id = mock_job.call_args.kwargs["job_id"]
         assert response.headers["location"] == f"/api/v0/cutouts/async/{job_id}"
+
+    @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
+    def test_file_name_request_invalid_rejected(self, mock_job):
+        """Test that we reject invalid mission parameters for the /async endpoint"""
+
+        # Mock the job creation for the async cutout endpoint
+        mock_instance = mock_job.return_value
+        mock_instance.create_job = mock.AsyncMock()
+
+        # Send an invalid request
+        file_name_request = {"survey": "bad survey type", "filter": {"my filter": "val"}}
+        async_form_data = {"fake_source": json.dumps(file_name_request), "position": ["m101"], "size": 4}
+        response = self.client.post("api/v0/cutouts/async", data=async_form_data, follow_redirects=False)
+        assert response.status_code == 422
+
+        response_body = response.json()
+        assert "detail" in response_body
+        assert len(response_body["detail"]) == 2
+        assert response_body["detail"][0]["type"] == "list_type"
+        assert response_body["detail"][0]["loc"] == ["survey"]
+        assert response_body["detail"][0]["msg"] == "Input should be a valid list"

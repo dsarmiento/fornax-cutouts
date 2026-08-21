@@ -147,8 +147,8 @@ class CutoutsUWSHandler:
             for source_name, params in mission_params.items():
                 if source_name in cutout_registry.get_source_names():
                     # Note: FilenameRequest has no required fields and by default allows extra fields
-                    # so we set extra="forbid" to force some kind of validation here.
-                    FilenameRequest.model_validate(params, extra="forbid")
+                    # so this check is limited
+                    FilenameRequest.model_validate(params)
         except ValidationError as e:
             raise RequestValidationError(e.errors())
 
