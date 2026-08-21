@@ -1,4 +1,4 @@
-""" """
+"""Tests for the API"""
 
 import json
 from unittest import mock
@@ -31,27 +31,29 @@ class FakeSource(AbstractMissionSource):
         return [response]
 
 
-@patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
-def test_file_name_request_valid_across_apis(mock_job):
-    """Test that the mission parameters passed as a JSON string to the /async endpoint in async_uws.py is accepted
-    to the /filenames endpoint in metadata.py"""
-
-    # Mock the job creation for the async cutout endpoint
-    mock_instance = mock_job.return_value
-    mock_instance.create_job = mock.AsyncMock(return_value="job123")
-
-    # Set up the app for testing
+class TestAPIInputFormats:
     client = TestClient(main_app)
-    file_name_request = FilenameRequest(survey=["c"], filter=["a"]).model_dump()
-    request_data = {"position": ["m101"], "mission": {"fake": file_name_request}}
-    response = client.post("/api/v0/filenames", json=request_data)
-    assert response.status_code == 200
 
-    # Check that we can send the same FilenameRequest to the async cutout endpoint
-    async_form_data = {"fake": json.dumps(file_name_request), "position": ["m101"], "size": 4}
-    response = client.post("api/v0/cutouts/async", data=async_form_data, follow_redirects=False)
-    assert response.status_code == 303
+    @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
+    def test_file_name_request_valid_across_apis(self, mock_job):
+        """Test that the mission parameters passed as a JSON string to the /async endpoint in async_uws.py is accepted
+        to the /filenames endpoint in metadata.py"""
 
-    # Get the job id from the mock and check that we redirected to that location
-    job_id = mock_job.call_args.kwargs["job_id"]
-    assert response.headers["location"] == f"/api/v0/cutouts/async/{job_id}"
+        # Mock the job creation for the async cutout endpoint
+        mock_instance = mock_job.return_value
+        mock_instance.create_job = mock.AsyncMock(return_value="job123")
+
+        # Set up the app for testing
+        file_name_request = FilenameRequest(survey=["c"], filter=["a"]).model_dump()
+        request_data = {"position": ["m101"], "mission": {"fake": file_name_request}}
+        response = self.client.post("/api/v0/filenames", json=request_data)
+        assert response.status_code == 200
+
+        # Check that we can send the same FilenameRequest to the async cutout endpoint
+        async_form_data = {"fake": json.dumps(file_name_request), "position": ["m101"], "size": 4}
+        response = self.client.post("api/v0/cutouts/async", data=async_form_data, follow_redirects=False)
+        assert response.status_code == 303
+
+        # Get the job id from the mock and check that we redirected to that location
+        job_id = mock_job.call_args.kwargs["job_id"]
+        assert response.headers["location"] == f"/api/v0/cutouts/async/{job_id}"
