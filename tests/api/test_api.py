@@ -36,8 +36,8 @@ class TestAPIInputFormats:
 
     @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
     def test_file_name_request_valid_across_apis(self, mock_job):
-        """Test that the mission parameters passed as a JSON string to the /async endpoint in async_uws.py is accepted
-        to the /filenames endpoint in metadata.py"""
+        """Test that the mission parameters passed to the /filenames endpoint is valid when passed as a JSON string
+        to the /async endpoint"""
 
         # Mock the job creation for the async cutout endpoint
         mock_instance = mock_job.return_value
