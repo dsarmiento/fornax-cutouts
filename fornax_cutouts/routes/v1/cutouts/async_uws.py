@@ -7,8 +7,10 @@ from typing import Annotated, Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Path, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import RedirectResponse
 from fastapi_utils.cbv import cbv
+from pydantic import ValidationError
 from redis.asyncio import Redis, RedisCluster
 from vo_models.uws.models import Jobs, JobSummary, Parameters, ResultReference, Results
 from vo_models.uws.types import ExecutionPhase
@@ -21,6 +23,7 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, async_redis_client_factory
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
+from fornax_cutouts.models.metadata import FilenameRequest
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
 from fornax_cutouts.utils.html_link import html_link
@@ -137,6 +140,17 @@ class CutoutsUWSHandler:
                     mission_params[source_name][param_name] = [mission_params[source_name][param_name], value]
                 else:
                     mission_params[source_name][param_name].append(value)
+
+        # Validate mission parameters using FilenameRequest to make sure this endpoint is consistent with the
+        # /filenames endpoint in metadata.py
+        try:
+            for source_name, params in mission_params.items():
+                if source_name in cutout_registry.get_source_names():
+                    # Note: FilenameRequest has no required fields and by default allows extra fields
+                    # so we set extra="forbid" to force some kind of validation here.
+                    FilenameRequest.model_validate(params, extra="forbid")
+        except ValidationError as e:
+            raise RequestValidationError(e.errors())
 
         request_params = {
             "position": position,
