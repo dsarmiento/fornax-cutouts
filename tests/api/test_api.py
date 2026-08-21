@@ -17,7 +17,7 @@ from fornax_cutouts.sources import AbstractMissionSource, MissionMetadata, cutou
 @cutout_registry.register_source()
 class FakeSource(AbstractMissionSource):
     metadata: MissionMetadata = MissionMetadata(
-        name="fake",
+        name="fake_source",
         pixel_size=0.55,
         max_cutout_size=4,
         filter=["a", "b"],
@@ -25,9 +25,9 @@ class FakeSource(AbstractMissionSource):
     )
 
     def get_filenames(self, **kwargs) -> list[FilenameLookupResponse]:
-        fake_position = TargetPosition(ra=210.8023, dec=54.34875)
+        cutout_position = TargetPosition(ra=210.8023, dec=54.34875)
         file_with_metadata = FilenameWithMetadata(filename="example.fits", metadata={})
-        response = FilenameLookupResponse(mission="fake", target=fake_position, filenames=[file_with_metadata])
+        response = FilenameLookupResponse(mission="fake", target=cutout_position, filenames=[file_with_metadata])
         return [response]
 
 
@@ -45,12 +45,12 @@ class TestAPIInputFormats:
 
         # Set up the app for testing
         file_name_request = FilenameRequest(survey=["c"], filter=["a"]).model_dump()
-        request_data = {"position": ["m101"], "mission": {"fake": file_name_request}}
+        request_data = {"position": ["m101"], "mission": {"fake_source": file_name_request}}
         response = self.client.post("/api/v0/filenames", json=request_data)
         assert response.status_code == 200
 
         # Check that we can send the same FilenameRequest to the async cutout endpoint
-        async_form_data = {"fake": json.dumps(file_name_request), "position": ["m101"], "size": 4}
+        async_form_data = {"fake_source": json.dumps(file_name_request), "position": ["m101"], "size": 4}
         response = self.client.post("api/v0/cutouts/async", data=async_form_data, follow_redirects=False)
         assert response.status_code == 303
 
