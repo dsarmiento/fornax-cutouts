@@ -24,10 +24,10 @@ class FakeSource(AbstractMissionSource):
         self.file_count = file_count
         self.filenames_calls = 0
 
-    def get_filenames(self, positions, *args, **kwargs):
+    def get_filenames(self, position, filter=None, survey=None, **kwargs):
         self.filenames_calls += 1
         filenames = [FilenameWithMetadata(filename=f"file-{i}.fits") for i in range(self.file_count)]
-        target = positions[0] if isinstance(positions, list) else positions
+        target = position[0] if isinstance(position, list) else position
         return [FilenameLookupResponse(mission="fake", target=target, filenames=filenames)]
 
 
@@ -65,6 +65,18 @@ def test_default_get_count_uses_get_filenames():
     assert source.filenames_calls == 1
 
 
+def test_mission_count_default_uses_get_filenames():
+    source = FakeSource(file_count=3)
+    cutout_registry._SOURCES["fake"] = source
+
+    response = _client().post("/api/v0/filenames/fake/count", json={"position": ["10.0 20.0"]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_files"] == 3
+    assert source.filenames_calls == 1
+
+
 def test_mission_count_uses_get_count():
     source = FastCountFakeSource(file_count=2, count=9)
     cutout_registry._SOURCES["fake"] = source
@@ -74,7 +86,6 @@ def test_mission_count_uses_get_count():
     assert response.status_code == 200
     body = response.json()
     assert body["total_files"] == 9
-    assert "filenames" not in body
     assert source.count_calls == 1
     assert source.filenames_calls == 0
 

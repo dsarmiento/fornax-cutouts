@@ -66,7 +66,7 @@ sequenceDiagram
 
     Note over Worker: schedule_job task fires
     Worker->>Registry: get_target_filenames(positions, {ps1: {filter: r}})
-    Registry->>Source: get_filenames(positions, filter="r")
+    Registry->>Source: get_filenames(position, filter="r")
     Source-->>Registry: [FilenameLookupResponse, ...]
     Registry-->>Worker: list of file descriptors
     Worker->>Worker: dispatch execute_cutout tasks
@@ -99,8 +99,8 @@ class MySource(AbstractMissionSource):
 
     def get_filenames(
         self,
-        positions: TargetPosition | Positions,
-        filters: str | list[str],
+        position: TargetPosition | Positions,
+        filter: str | list[str] = ["g", "r", "i"],
         **kwargs,
     ) -> list[FilenameLookupResponse]:
         ...

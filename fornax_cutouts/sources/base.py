@@ -62,12 +62,15 @@ class AbstractMissionSource(ABC):
     @abstractmethod
     def get_filenames(
         self,
-        positions: TargetPosition | Positions,
-        filters: str | list[str],
+        position: TargetPosition | Positions,
+        filter: str | list[str],
         **kwargs,
     ) -> list[FilenameLookupResponse]: ...
 
     def get_count(self, position: TargetPosition | Positions, **kwargs) -> int:
-        """Count matching files. Override when a cheaper query exists."""
-        results = self.get_filenames(positions=position, **kwargs)
+        """Count matching files. Override when a cheaper query exists.
+
+        ``**kwargs`` are the mission-specific extras from the request body.
+        """
+        results = self.get_filenames(position, **kwargs)
         return sum(len(result.filenames) for result in results)
