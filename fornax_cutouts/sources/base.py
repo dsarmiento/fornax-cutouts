@@ -66,3 +66,8 @@ class AbstractMissionSource(ABC):
         filters: str | list[str],
         **kwargs,
     ) -> list[FilenameLookupResponse]: ...
+
+    def get_count(self, position: TargetPosition | Positions, **kwargs) -> int:
+        """Count matching files. Override when a cheaper query exists."""
+        results = self.get_filenames(positions=position, **kwargs)
+        return sum(len(result.filenames) for result in results)

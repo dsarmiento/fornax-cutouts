@@ -3,11 +3,22 @@ from typing import Annotated
 from fastapi import APIRouter, Body, HTTPException, status
 from fastapi_utils.cbv import cbv
 
-from fornax_cutouts.models.metadata import FilenameRequest
-from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.models.metadata import FilenameCountResponse, FilenameRequest
+from fornax_cutouts.sources import AbstractMissionSource, cutout_registry
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 metadata_router = APIRouter(tags=["Metadata"])
+
+
+def _get_mission_or_404(mission: str) -> AbstractMissionSource:
+    """Look up a registered mission or raise 404."""
+    try:
+        return cutout_registry.get_mission(mission)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mission does not exist",
+        )
 
 
 @cbv(metadata_router)
@@ -36,6 +47,37 @@ class MetadataHandler:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Mission does not exist",
             )
+
+    @metadata_router.post(
+        "/filenames/{mission}/count",
+        summary="Count filenames for a mission",
+        description="Resolve positions and return the matching file count for a single mission without a filename list.",
+        response_model=FilenameCountResponse,
+    )
+    def get_mission_filenames_count(
+        self,
+        mission: str,
+        fname_request: Annotated[FilenameRequest, Body()],
+    ):
+        """Count matching files for a single mission."""
+        if fname_request.position is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="'position' cannot be null",
+            )
+
+        mission_source = _get_mission_or_404(mission)
+        mission_params = fname_request.model_dump(exclude={"position"}, exclude_none=True)
+
+        total_files = mission_source.get_count(
+            position=resolve_positions(fname_request.position),
+            **mission_params,
+        )
+
+        return {
+            "request": fname_request,
+            "total_files": total_files,
+        }
 
     @metadata_router.post(
         "/filenames",

@@ -81,6 +81,8 @@ Every source must subclass `AbstractMissionSource` and provide:
 1. A class-level `metadata` attribute of type `MissionMetadata`
 2. An implementation of `get_filenames()`
 
+`get_count()` has a default implementation that calls `get_filenames()` and sums the filename lists. Override it with a cheaper query (for example `COUNT(*)`) when the UI needs a file count without the full list.
+
 ```python
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
 from fornax_cutouts.models.cutouts import FilenameLookupResponse

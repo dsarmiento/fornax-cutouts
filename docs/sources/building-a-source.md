@@ -299,5 +299,6 @@ curl http://localhost:8000/api/v0/cutouts/async/{job_id}/phase
 - [ ] `metadata.name` matches the `register_source()` key
 - [ ] `get_filenames()` handles both `TargetPosition` and `Positions` input
 - [ ] `get_filenames()` returns an empty list (not an exception) when no files are found
+- [ ] Optional: override `get_count()` if counting files is cheaper than returning the full list
 - [ ] `filter` and `survey` are normalized with `_cast_list_parameter()`
 - [ ] Source appears in `GET /api/v0/missions` after startup

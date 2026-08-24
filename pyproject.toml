@@ -29,6 +29,7 @@ dev = [
     "isort>=7.0.0",
     "pre-commit>=4.3.0",
     "pyarrow-stubs>=20.0.0.20250928",
+    "pytest",
     "ruff>=0.14.1",
 ]
 
