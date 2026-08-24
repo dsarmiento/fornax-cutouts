@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Generator
+from typing import Any
 
 from redis import Redis as SyncRedisClient
 from redis import RedisCluster as SyncRedisCluster

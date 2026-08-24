@@ -123,8 +123,8 @@ def _monkey_patch_astrocut():
         return
     block_size_bytes = int(block_size_mib * 1024 * 1024)
     try:
-        import astrocut.fits_cutout as fits_cutout
         import numpy as np
+        from astrocut import fits_cutout
         from astropy.io import fits
 
         _orig_load = fits_cutout.FITSCutout._load_file_data
