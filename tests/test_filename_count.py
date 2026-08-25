@@ -24,7 +24,7 @@ class FakeSource(AbstractMissionSource):
         self.file_count = file_count
         self.filenames_calls = 0
 
-    def get_filenames(self, position, filter=None, survey=None, **kwargs):
+    def get_filenames(self, position, filter, survey=None, **kwargs):
         self.filenames_calls += 1
         filenames = [FilenameWithMetadata(filename=f"file-{i}.fits") for i in range(self.file_count)]
         target = position[0] if isinstance(position, list) else position
@@ -39,7 +39,7 @@ class FastCountFakeSource(FakeSource):
         self.count = count
         self.count_calls = 0
 
-    def get_count(self, position, **kwargs):
+    def get_count(self, position, filter, **kwargs):
         self.count_calls += 1
         return self.count
 
@@ -60,7 +60,7 @@ def teardown_function():
 
 def test_default_get_count_uses_get_filenames():
     source = FakeSource(file_count=3)
-    count = source.get_count(position=[TargetPosition(10.0, 20.0)])
+    count = source.get_count(position=[TargetPosition(10.0, 20.0)], filter=["g"])
     assert count == 3
     assert source.filenames_calls == 1
 
@@ -69,7 +69,10 @@ def test_mission_count_default_uses_get_filenames():
     source = FakeSource(file_count=3)
     cutout_registry._SOURCES["fake"] = source
 
-    response = _client().post("/api/v0/filenames/fake/count", json={"position": ["10.0 20.0"]})
+    response = _client().post(
+        "/api/v0/filenames/fake/count",
+        json={"position": ["10.0 20.0"], "filter": ["g"]},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -81,7 +84,10 @@ def test_mission_count_uses_get_count():
     source = FastCountFakeSource(file_count=2, count=9)
     cutout_registry._SOURCES["fake"] = source
 
-    response = _client().post("/api/v0/filenames/fake/count", json={"position": ["10.0 20.0"]})
+    response = _client().post(
+        "/api/v0/filenames/fake/count",
+        json={"position": ["10.0 20.0"], "filter": ["g"]},
+    )
 
     assert response.status_code == 200
     body = response.json()
