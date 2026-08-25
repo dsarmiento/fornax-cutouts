@@ -479,12 +479,23 @@ def generate_cutout(  # noqa: C901
 
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
-        cutout = astrocut.FITSCutout(
-            input_files=source_file,
-            coordinates=SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs"),
-            cutout_size=size,
-            single_outfile=False,
-        )
+        # TODO: detect input file extension/type
+        if "fits" in output_format:
+            cutout = astrocut.FITSCutout(
+                input_files=source_file,
+                coordinates=SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs"),
+                cutout_size=size,
+                single_outfile=False,
+            )
+        elif "asdf" in output_format:
+            cutout = astrocut.ASDFCutout(
+                input_files=source_file,
+                coordinates=SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs"),
+                cutout_size=size,
+            )
+        else:
+            raise ValueError(f"Unsupported output format: {output_format}")
+
         astrocut_init_time = time.perf_counter()
 
         if "fits" in output_format:
@@ -494,7 +505,13 @@ def generate_cutout(  # noqa: C901
                 cutout_prefix=cutout_prefix,
             )[0]
         fits_write_time = time.perf_counter()
-
+        if "asdf" in output_format:
+            science_out_format = "asdf"
+            asdf_fname = cutout.write_as_asdf(
+                output_dir=temp_output_dir,
+                cutout_prefix=cutout_prefix,
+            )[0]
+        asdf_write_time = time.perf_counter()
         if "jpg" in output_format or "jpeg" in output_format:
             preview_out_format = "jpeg"
             img_fname = cutout.write_as_img(
@@ -505,11 +522,18 @@ def generate_cutout(  # noqa: C901
             )[0]
         jpg_write_time = time.perf_counter()
 
+        # TODO: Do we ever need to handle multiple science files at once?
         if fits_fname:
             science_bytes = Path(fits_fname).stat().st_size
             fits_dest_fname = fits_fname.replace(temp_output_dir, output_dir)
             fs.put(lpath=fits_fname, rpath=fits_dest_fname)
             fits_fname = fits_dest_fname
+
+        if asdf_fname:
+            science_bytes = Path(asdf_fname).stat().st_size
+            asdf_dest_fname = asdf_fname.replace(temp_output_dir, output_dir)
+            fs.put(lpath=asdf_fname, rpath=asdf_dest_fname)
+            asdf_fname = asdf_dest_fname
 
         if img_fname:
             preview_bytes = Path(img_fname).stat().st_size
@@ -534,6 +558,11 @@ def generate_cutout(  # noqa: C901
         output_formats["science"] = science_out_format
         bytes["science"] = science_bytes
         timings_s["science_write"] = round(fits_write_time - astrocut_init_time, 4)
+
+    if asdf_fname:
+        output_formats["science"] = science_out_format
+        bytes["science"] = science_bytes
+        timings_s["science_write"] = round(asdf_write_time - astrocut_init_time, 4)
 
     if img_fname:
         output_formats["preview"] = preview_out_format
