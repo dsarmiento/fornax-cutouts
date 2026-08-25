@@ -86,6 +86,7 @@ class MyMissionSource(AbstractMissionSource):
 - `metadata` is a class-level attribute, not an instance attribute.
 - `get_filenames()` receives the positions as a `TargetPosition` (single position) or `Positions` (list of `(ra, dec)` tuples). Always handle both cases.
 - Use `self._cast_list_parameter()` to normalize `filter` and `survey` from either a string or list to a list.
+- When a request omits `filter` or `survey`, the API does not pass them; your `get_filenames()` defaults apply.
 - Return an empty list if no files are found — never raise an exception for missing data.
 
 ---
