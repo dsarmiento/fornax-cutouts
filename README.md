@@ -37,6 +37,8 @@ Full documentation is available at
 - [CLI Reference](https://nasa-fornax.github.io/fornax-cutouts/cli)
 - [API Reference](https://nasa-fornax.github.io/fornax-cutouts/api)
 - [Building a Source](https://nasa-fornax.github.io/fornax-cutouts/sources/building-a-source)
+- [Auth Providers Overview](https://nasa-fornax.github.io/fornax-cutouts/auth/overview)
+- [Building an Auth Provider](https://nasa-fornax.github.io/fornax-cutouts/auth/building-a-provider)
 
 ## Use as a library
 

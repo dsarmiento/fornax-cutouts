@@ -13,6 +13,10 @@ project:
       children:
         - file: docs/sources/overview.md
         - file: docs/sources/building-a-source.md
+    - title: Auth
+      children:
+        - file: docs/auth/overview.md
+        - file: docs/auth/building-a-provider.md
     - title: Celery tasks
       file: docs/celery-tasks.md
     - title: Deployment
