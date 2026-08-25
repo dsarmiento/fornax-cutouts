@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
+import asdf
 import astrocut
 from astropy.coordinates import SkyCoord
 from astropy.io.fits.hdu.hdulist import HDUList
@@ -410,6 +411,17 @@ def write_results(self: Task, job_id: str, batch_num: int):
         r.delete_batch_keys(batch_num)
 
 
+def get_asdf_filter(asdf_cutout: asdf.AsdfFile) -> str | None:
+    """Get the filter info from the instrument metadata"""
+    filter = None
+    try:
+        filter = asdf_cutout["roman"]["meta"]["instrument"]["optical_element"]
+    except KeyError:
+        pass
+
+    return filter
+
+
 def get_fits_filter(fits_cutout: HDUList) -> str | None:
     filter = None
     try:
@@ -472,6 +484,7 @@ def generate_cutout(  # noqa: C901
 
     fits_fname = ""
     img_fname = ""
+    asdf_fname = ""
     science_bytes = 0
     preview_bytes = 0
     science_out_format = ""
@@ -509,7 +522,6 @@ def generate_cutout(  # noqa: C901
             science_out_format = "asdf"
             asdf_fname = cutout.write_as_asdf(
                 output_dir=temp_output_dir,
-                cutout_prefix=cutout_prefix,
             )[0]
         asdf_write_time = time.perf_counter()
         if "jpg" in output_format or "jpeg" in output_format:
@@ -558,11 +570,13 @@ def generate_cutout(  # noqa: C901
         output_formats["science"] = science_out_format
         bytes["science"] = science_bytes
         timings_s["science_write"] = round(fits_write_time - astrocut_init_time, 4)
+        science_fname = fits_fname
 
     if asdf_fname:
         output_formats["science"] = science_out_format
         bytes["science"] = science_bytes
         timings_s["science_write"] = round(asdf_write_time - astrocut_init_time, 4)
+        science_fname = asdf_fname
 
     if img_fname:
         output_formats["preview"] = preview_out_format
@@ -599,15 +613,21 @@ def generate_cutout(  # noqa: C901
             "timings_s": timings_s,
         },
     )
+    filter_val = metadata.get("filter")
+    if not filter_val:
+        if fits_fname:
+            filter_val = get_fits_filter(cutout.fits_cutouts[0])
+    if not filter_val:
+        if asdf_fname:
+            filter_val = get_asdf_filter(cutout.asdf_cutouts[0])
 
-    filter_val = metadata.get("filter") or get_fits_filter(cutout.fits_cutouts[0])
     mission_extras = {k: v for k, v in metadata.items() if k != "filter"}
     return CutoutResponse(
         mission=mission,
         position=target,
         size_px=size,
         filter=filter_val,
-        science=fits_fname,
+        science=science_fname,
         preview=img_fname,
         mission_extras=mission_extras,
     )
