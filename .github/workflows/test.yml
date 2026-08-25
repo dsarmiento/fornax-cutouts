@@ -1,4 +1,4 @@
-name: Lint and Format
+name: Test
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  lint:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -21,5 +21,14 @@ jobs:
       - name: Install dependencies (dev)
         run: uv sync --group dev
 
-      - name: Run pre-commit
-        run: uv run pre-commit run --all-files
+      - name: Run pytest
+        run: uv run pytest --junitxml=junit.xml --cov=fornax_cutouts --cov-report=term --cov-report=xml:coverage.xml
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-reports
+          path: |
+            junit.xml
+            coverage.xml

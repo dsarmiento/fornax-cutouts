@@ -4,7 +4,7 @@ from fornax_cutouts.sources.registry import CutoutRegistry
 cutout_registry = CutoutRegistry()
 
 __all__ = [
-    AbstractMissionSource,
-    MissionMetadata,
-    cutout_registry,
+    "AbstractMissionSource",
+    "MissionMetadata",
+    "cutout_registry",
 ]

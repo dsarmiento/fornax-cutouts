@@ -69,8 +69,8 @@ class FornaxCutoutsConfig(BaseSettings):
 
     service_name: str = "Fornax Cutouts"
 
-    deployment_type: DeploymentType = "local"
-    deployment_environment: DeploymentEnvironment = "dev"
+    deployment_type: DeploymentType = DeploymentType.LOCAL
+    deployment_environment: DeploymentEnvironment = DeploymentEnvironment.DEV
 
     redis: RedisConfig = Field(default_factory=RedisConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)

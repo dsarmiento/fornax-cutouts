@@ -42,12 +42,14 @@ When the service is running, full interactive documentation is available at:
 
 ### Missions & Metadata
 
-| Method | Path                          | Description                                                                                                                 |
-| ------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/api/v0/missions`            | List all registered mission sources with their metadata (name, pixel size, max cutout size, available filters and surveys). |
-| `GET`  | `/api/v0/missions/{mission}`  | Metadata for a single mission. Returns 404 if the mission is not registered.                                                |
-| `POST` | `/api/v0/filenames`           | Look up source FITS filenames for one or more missions given sky positions.                                                 |
-| `POST` | `/api/v0/filenames/{mission}` | File lookup scoped to a specific mission.                                                                                   |
+| Method | Path                                | Description                                                                                                                 |
+|--------|-------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `GET`  | `/api/v0/missions`                  | List all registered mission sources with their metadata (name, pixel size, max cutout size, available filters and surveys). |
+| `GET`  | `/api/v0/missions/{mission}`        | Metadata for a single mission. Returns 404 if the mission is not registered.                                                |
+| `POST` | `/api/v0/filenames`                 | Look up source FITS filenames for one or more missions given sky positions.                                                 |
+| `POST` | `/api/v0/filenames/count`           | Count matching source files for one or more missions without returning filename lists.                                      |
+| `POST` | `/api/v0/filenames/{mission}`       | File lookup scoped to a specific mission.                                                                                   |
+| `POST` | `/api/v0/filenames/{mission}/count` | Count matching source files for a specific mission. Same request body as `/filenames/{mission}`.                            |
 
 ---
 

@@ -66,7 +66,7 @@ sequenceDiagram
 
     Note over Worker: schedule_job task fires
     Worker->>Registry: get_target_filenames(positions, {ps1: {filter: r}})
-    Registry->>Source: get_filenames(positions, filter="r")
+    Registry->>Source: get_filenames(position, filter="r")
     Source-->>Registry: [FilenameLookupResponse, ...]
     Registry-->>Worker: list of file descriptors
     Worker->>Worker: dispatch execute_cutout tasks
@@ -80,6 +80,8 @@ Every source must subclass `AbstractMissionSource` and provide:
 
 1. A class-level `metadata` attribute of type `MissionMetadata`
 2. An implementation of `get_filenames()`
+
+`get_count()` has a default implementation that calls `get_filenames()` and sums the filename lists. Override it with a cheaper query (for example `COUNT(*)`) when the UI needs a file count without the full list.
 
 ```python
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
@@ -97,8 +99,8 @@ class MySource(AbstractMissionSource):
 
     def get_filenames(
         self,
-        positions: TargetPosition | Positions,
-        filters: str | list[str],
+        position: TargetPosition | Positions,
+        filter: str | list[str] = ["g", "r", "i"],
         **kwargs,
     ) -> list[FilenameLookupResponse]:
         ...

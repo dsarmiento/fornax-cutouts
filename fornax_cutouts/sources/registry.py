@@ -2,12 +2,15 @@ import logging
 from dataclasses import dataclass, field
 from functools import cached_property
 from importlib.util import module_from_spec, spec_from_file_location
+from typing import TypeVar
 
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import Positions
 from fornax_cutouts.models.cutouts import FilenameLookupResponse
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
 from fornax_cutouts.utils.logging import get_logger
+
+_MissionSourceT = TypeVar("_MissionSourceT", bound=AbstractMissionSource)
 
 
 @dataclass
@@ -20,7 +23,7 @@ class CutoutRegistry:
         return sorted(self._SOURCES.keys())
 
     def register_source(self):
-        def _decorator(cls: AbstractMissionSource) -> AbstractMissionSource:
+        def _decorator(cls: type[_MissionSourceT]) -> type[_MissionSourceT]:
             mission_name = cls.metadata.name
             self._SOURCES[mission_name] = cls()
             return cls
