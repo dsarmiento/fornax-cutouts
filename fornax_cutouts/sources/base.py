@@ -67,10 +67,15 @@ class AbstractMissionSource(ABC):
         **kwargs,
     ) -> list[FilenameLookupResponse]: ...
 
-    def get_count(self, position: TargetPosition | Positions, **kwargs) -> int:
+    def get_count(
+        self,
+        position: TargetPosition | Positions,
+        filter: str | list[str],
+        **kwargs,
+    ) -> int:
         """Count matching files. Override when a cheaper query exists.
 
         ``**kwargs`` are the mission-specific extras from the request body.
         """
-        results = self.get_filenames(position, **kwargs)
+        results = self.get_filenames(position, filter, **kwargs)
         return sum(len(result.filenames) for result in results)
