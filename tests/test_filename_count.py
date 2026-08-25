@@ -38,9 +38,11 @@ class FastCountFakeSource(FakeSource):
         super().__init__(file_count=file_count)
         self.count = count
         self.count_calls = 0
+        self.count_requests = []
 
-    def get_count(self, position, filter, **kwargs):
+    def get_count(self, position, filter=None, **kwargs):
         self.count_calls += 1
+        self.count_requests.append((filter, kwargs))
         return self.count
 
 
@@ -100,3 +102,74 @@ def test_count_unknown_mission_is_404():
     client = _client()
     response = client.post("/api/v0/filenames/missing/count", json={"position": ["10.0 20.0"]})
     assert response.status_code == 404
+
+
+def test_multi_mission_count_sums_counts_without_filename_lists():
+    fast_source = FastCountFakeSource(count=9)
+    default_source = FakeSource(file_count=3)
+    cutout_registry._SOURCES.update(fast=fast_source, default=default_source)
+
+    response = _client().post(
+        "/api/v0/filenames/count",
+        json={"position": ["10.0 20.0"], "mission": {"fast": {"filter": ["g"]}, "default": {"filter": ["g"]}}},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_files"] == 12
+    assert body["missions"] == {
+        "fast": {"total_files": 9},
+        "default": {"total_files": 3},
+    }
+    assert "filenames" not in body
+    assert fast_source.count_calls == 1
+    assert fast_source.filenames_calls == 0
+    assert default_source.filenames_calls == 1
+
+
+def test_multi_mission_count_passes_each_mission_parameters():
+    first_source = FastCountFakeSource(count=4)
+    second_source = FastCountFakeSource(count=6)
+    cutout_registry._SOURCES.update(first=first_source, second=second_source)
+
+    response = _client().post(
+        "/api/v0/filenames/count",
+        json={
+            "position": ["10.0 20.0"],
+            "mission": {
+                "first": {"filter": ["g"], "survey": ["s"]},
+                "second": {"filter": ["r"], "survey": ["wide"]},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total_files"] == 10
+    assert first_source.count_requests[0][0] == ["g"]
+    assert first_source.count_requests[0][1] == {"survey": ["s"]}
+    assert second_source.count_requests[0][0] == ["r"]
+    assert second_source.count_requests[0][1] == {"survey": ["wide"]}
+
+
+def test_multi_mission_count_unknown_mission_is_404():
+    cutout_registry._SOURCES["fake"] = FakeSource()
+
+    response = _client().post(
+        "/api/v0/filenames/count",
+        json={"position": ["10.0 20.0"], "mission": ["missing"]},
+    )
+
+    assert response.status_code == 404
+
+
+def test_single_mission_filenames_route():
+    source = FakeSource(file_count=3)
+    cutout_registry._SOURCES["fake"] = source
+
+    response = _client().post(
+        "/api/v0/filenames/fake",
+        json={"position": ["10.0 20.0"], "filter": ["g"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total_files"] == 3

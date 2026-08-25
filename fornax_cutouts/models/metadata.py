@@ -15,3 +15,13 @@ class FilenameCountResponse(BaseModel):
 
     request: FilenameRequest
     total_files: int
+
+
+class MissionCountResult(BaseModel):
+    total_files: int
+
+
+class MultiMissionFilenameCountResponse(BaseModel):
+    request: dict
+    total_files: int
+    missions: dict[str, MissionCountResult]
