@@ -915,12 +915,14 @@ dev = [
     { name = "pre-commit" },
     { name = "pyarrow-stubs" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
 test = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
 ]
 
 [package.metadata]
@@ -947,13 +949,15 @@ dev = [
     { name = "isort", specifier = ">=7.0.0" },
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "pyarrow-stubs", specifier = ">=20.0.0.20250928" },
-    { name = "pytest" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=1.0" },
     { name = "pytest-cov" },
     { name = "ruff", specifier = ">=0.14.1" },
 ]
 test = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
+    { name = "pytest-cov" },
 ]
 
 [[package]]
