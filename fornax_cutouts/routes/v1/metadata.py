@@ -21,6 +21,10 @@ def _get_mission_or_404(mission: str) -> AbstractMissionSource:
         )
 
 
+def _filename_params(fname_request: FilenameRequest) -> dict:
+    return fname_request.model_dump(exclude={"position"}, exclude_none=True)
+
+
 @cbv(metadata_router)
 class MetadataHandler:
     @metadata_router.get(
@@ -67,7 +71,7 @@ class MetadataHandler:
             )
 
         mission_source = _get_mission_or_404(mission)
-        mission_params = fname_request.model_dump(exclude={"position"}, exclude_none=True)
+        mission_params = _filename_params(fname_request)
 
         total_files = mission_source.get_count(
             position=resolve_positions(fname_request.position),
@@ -99,9 +103,8 @@ class MetadataHandler:
 
         # TODO: Make this portion call get_filenames in parallel once serving more than one mission
         for mission_name, fname_request in mission.items():
-            request_dict = fname_request.model_dump()
+            request_dict = _filename_params(fname_request)
             request_dict["position"] = resolved_positions
-            request_dict = {k: v for k, v in request_dict.items() if v is not None}
 
             mission_source = cutout_registry.get_mission(mission_name)
             mission_filenames = mission_source.get_filenames(
@@ -139,7 +142,7 @@ class MetadataHandler:
         if fname_request.position is None:
             raise ValueError("'position' cannot be null")
 
-        mission_params = fname_request.model_dump(exclude={"position"})
+        mission_params = _filename_params(fname_request)
 
         fnames = cutout_registry.get_mission(mission).get_filenames(
             position=resolve_positions(fname_request.position),
