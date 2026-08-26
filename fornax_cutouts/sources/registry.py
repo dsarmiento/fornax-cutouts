@@ -1,10 +1,8 @@
 import logging
 from dataclasses import dataclass, field
 from functools import cached_property
-from importlib.util import module_from_spec, spec_from_file_location
 from typing import TypeVar
 
-from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.base import Positions
 from fornax_cutouts.models.cutouts import FilenameLookupResponse
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
@@ -22,32 +20,51 @@ class CutoutRegistry:
     def _VALID_SOURCES(self) -> list[str]:
         return sorted(self._SOURCES.keys())
 
-    def register_source(self):
-        def _decorator(cls: type[_MissionSourceT]) -> type[_MissionSourceT]:
-            mission_name = cls.metadata.name
-            self._SOURCES[mission_name] = cls()
-            return cls
+    def register_source(self, cls: type[_MissionSourceT]) -> type[_MissionSourceT]:
+        """
+        Register a mission source by decorating the class with @source_registry.register_source.
 
-        return _decorator
+        Args:
+            cls (type[_MissionSourceT]): The mission source class to register.
 
-    def discover_sources(self):
-        for source in CONFIG.source_path.glob("**/*.py"):
-            spec = spec_from_file_location(f"cutouts_source_{source.name}", source.as_posix())
-            module = module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-        self.logger.debug(f"Registered sources: {self.get_source_names()}")
+        Returns:
+            type[_MissionSourceT]: The registered mission source class.
+        """
+        self._SOURCES[cls.metadata.name] = cls()
+        self.logger.info(f"Registered {cls.metadata.name} as a mission source")
+        return cls
 
     def get_source_names(self) -> list[str]:
+        """
+        Get the names of all registered mission sources.
+
+        Returns:
+            list[str]: The names of all registered mission sources.
+        """
         return self._VALID_SOURCES
 
-    def get_mission(self, mission: str) -> AbstractMissionSource:
+    def get_mission(self, mission: str) -> _MissionSourceT:
+        """
+        Get the mission source for a given mission name.
+
+        Args:
+            mission (str): The name of the mission to get the source for.
+
+        Returns:
+            _MissionSourceT: The mission source for the given mission name.
+        """
         try:
             return self._SOURCES[mission]
         except KeyError as exc:
             raise ValueError(f"Unknown source '{mission}'. Registered: {', '.join(self._SOURCES)}") from exc
 
     def get_mission_metadata(self) -> dict[str, MissionMetadata]:
+        """
+        Get the mission metadata for all registered mission sources.
+
+        Returns:
+            dict[str, MissionMetadata]: The mission metadata for all registered mission sources.
+        """
         return {mission.metadata.name: mission.metadata for mission in self._SOURCES.values()}
 
     def validate_mission_params(
@@ -55,6 +72,16 @@ class CutoutRegistry:
         mission_params: dict[str, dict],
         size: int | None = None,
     ) -> dict[str, bool]:
+        """
+        Validate the mission parameters.
+
+        Args:
+            mission_params (dict[str, dict]): The mission parameters to validate by mission name.
+            size (int | None): The size to validate the mission parameters for.
+
+        Returns:
+            dict[str, bool]: The validation results for the mission parameters by mission name.
+        """
         validation_results = dict.fromkeys(mission_params, True)
 
         for mission, params in mission_params.items():
@@ -80,6 +107,17 @@ class CutoutRegistry:
         mission_params: dict[str, dict],
         size: int | None = None,
     ) -> list[FilenameLookupResponse]:
+        """
+        Get the target filenames for a given position and mission parameters.
+
+        Args:
+            position (Positions): The position to get the filenames for.
+            mission_params (dict[str, dict]): The mission parameters to get the filenames for.
+            size (int | None): The size to get the filenames for.
+
+        Returns:
+            list[FilenameLookupResponse]: The target filenames for the given position and mission parameters.
+        """
         ret = []
 
         for mission, params in mission_params.items():

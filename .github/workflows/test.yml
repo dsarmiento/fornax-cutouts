@@ -9,6 +9,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    services:
+      valkey:
+        image: valkey/valkey:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -18,11 +30,13 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install dependencies (dev)
-        run: uv sync --group dev
+      - name: Install dependencies (test)
+        run: uv sync --group test
 
       - name: Run pytest
-        run: uv run pytest --junitxml=junit.xml --cov=fornax_cutouts --cov-report=term --cov-report=xml:coverage.xml
+        run: uv run pytest --tb=short -ra --junitxml=junit.xml --cov=fornax_cutouts --cov-report=term --cov-report=xml:coverage.xml
+        env:
+          CUTOUTS__SOURCE_PATH: /tmp
 
       - name: Upload test reports
         if: always()
