@@ -27,18 +27,25 @@ def client_ip_from_request(request: Request) -> str | None:
     """
     Best-effort original client IP, accounting for trusted reverse proxies.
 
-    With takes the rightmost IP in X-Forwarded-For after skipping N proxy-appended entries.
+    If there are no trusted proxies we take the raw TCP peer address.
+
+    Otherwise, take the rightmost IP in X-Forwarded-For after skipping N proxy-appended entries.
     This prevents clients from spoofing their IP by injecting their own XFF header values at the front of the list.
 
     Falls back to X-Real-IP, then the raw TCP peer address.
     """
+    peer = request.client.host if request.client else None
+
+    if CONFIG.num_trusted_proxies == 0:
+        return peer
+
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
-        ips = [ip.strip() for ip in forwarded_for.split(",")]
+        ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
         idx = -(CONFIG.num_trusted_proxies + 1)
-        candidate = ips[idx] if len(ips) >= abs(idx) else ips[-1]
-        if candidate:
-            return candidate
+        if len(ips) >= abs(idx):
+            return ips[idx]
+        return peer
 
     real_ip = request.headers.get("x-real-ip")
     if real_ip:
@@ -46,7 +53,7 @@ def client_ip_from_request(request: Request) -> str | None:
         if stripped:
             return stripped
 
-    return request.client.host if request.client else None
+    return peer
 
 
 def _json_safe(value: Any) -> Any:

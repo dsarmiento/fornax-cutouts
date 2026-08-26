@@ -126,8 +126,9 @@ def schedule_job(
                 descriptors.append(descriptor)
                 mission_cutout_counts[target_fname.mission] += 1
 
-        r.push_pending_tasks(descriptors)
-        total_jobs += len(descriptors)
+        if descriptors:
+            r.push_pending_tasks(descriptors)
+            total_jobs += len(descriptors)
         del target_fnames, descriptors, resolved_positions
 
     # No matching source files found; complete the job immediately.

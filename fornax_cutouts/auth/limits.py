@@ -136,7 +136,7 @@ class CutoutLimiter:
         Raises:
             CutoutLimitExceededError: If the cutout limit is exceeded
         """
-        if cutout_limit is None:
+        if not CONFIG.cutout_limit.enabled or cutout_limit is None:
             return
 
         keys = CutoutLimitKeys(identity=identity)

@@ -17,6 +17,7 @@ from vo_models.xlink import XlinkType
 
 from fornax_cutouts.auth import Principal, auth_registry
 from fornax_cutouts.auth.limits import CutoutLimiter
+from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, async_redis_client_factory
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
@@ -175,7 +176,7 @@ class CutoutsUWSHandler:
                 run_id=run_id,
                 parameters=request_params,
                 identity=principal.identity,
-                cutout_limit=principal.cutout_limit,
+                cutout_limit=principal.cutout_limit if CONFIG.cutout_limit.enabled else None,
                 window_seconds=principal.window_seconds,
             )
 
