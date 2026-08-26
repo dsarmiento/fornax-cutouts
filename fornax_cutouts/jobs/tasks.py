@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 import astrocut
 from astropy.coordinates import SkyCoord
-from astropy.io.fits.hdu.hdulist import HDUList
 from celery import Task
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.models import ExecutionPhase
@@ -415,18 +414,13 @@ def write_results(self: Task, job_id: str, batch_num: int):
         r.delete_batch_keys(batch_num)
 
 
-def get_fits_filter(fits_cutout: HDUList) -> str | None:
-    filter = None
-    try:
-        cutout_header = fits_cutout["CUTOUT"].header
-        filter = cutout_header["*FILTER*"][0]
-    except KeyError:
-        pass
-
-    return filter
-
-
 class CutoutHandler:
+    """
+    Abstract base class for handling cutouts from astronomical images.
+    Provides the interface for creating cutouts, generating previews, and
+    retrieving filter information for the cutouts.
+    """
+
     def __init__(
         self,
         input_files: list[str],
@@ -447,14 +441,61 @@ class CutoutHandler:
         output_dir: str,
         cutout_prefix: str | None = None,
     ) -> None:
+        """
+        Create a cutout from the given source file.
+
+        Args:
+            source_file (str): Path to the source image file.
+            target (TargetPosition): Target position for the cutout.
+            size (tuple[int, int]): Size of the cutout.
+            output_dir (str): Directory to save the cutout.
+            cutout_prefix (str | None): Prefix for the cutout filename.
+
+        Returns:
+            None
+        """
         pass
 
     @abstractmethod
-    def get_filter(self) -> str | None:
+    def make_preview(
+        self,
+        output_dir: str,
+        cutout_prefix: str = "cutout",
+        colorize: bool = False,
+    ) -> str:
+        """
+        Generate a preview image for the cutout.
+
+        Args:
+            output_dir (str): Directory to save the preview image.
+            cutout_prefix (str): Prefix for the preview image filename.
+            colorize (bool): Whether to colorize the preview image.
+
+        Returns:
+            str: Filename of the generated preview image.
+        """
+        pass
+
+    @abstractmethod
+    def get_filter(self, i) -> str | None:
+        """
+        Retrieve the filter information for the cutout of the i-th input file.
+
+        Args:
+            i (int): Index of the cutout.
+
+        Returns:
+            str | None: Filter information if available, otherwise None.
+        """
         pass
 
 
-class FitsCutoutHandler(CutoutHandler):
+class FITSCutoutHandler(CutoutHandler):
+    """
+    Implementation of CutoutHandler for handling FITS cutouts.
+    Uses the astrocut library to create and manage FITS cutouts.
+    """
+
     def _make_cutout(self):
         self.cutout = astrocut.FITSCutout(
             input_files=self.input_files,
@@ -481,24 +522,40 @@ class FitsCutoutHandler(CutoutHandler):
         self,
         output_dir: str,
         cutout_prefix: str = "cutout",
+        colorize: bool = False,
     ) -> str:
         if self.cutout is None:
             self._make_cutout()
         img_fname = self.cutout.write_as_img(
             output_dir=output_dir,
             cutout_prefix=cutout_prefix,
+            colorize=colorize,
             stretch=STRETCH,
             minmax_percent=MINMAX_PERCENT,
         )[0]
         return img_fname
 
-    def get_filter(self) -> str | None:
+    def get_filter(self, i) -> str | None:
         if self.cutout is None:
             self._make_cutout()
-        return get_fits_filter(self.cutout.fits_cutouts[0])
+
+        fits_cutout = self.cutout.fits_cutouts[i]
+        filter = None
+        try:
+            cutout_header = fits_cutout["CUTOUT"].header
+            filter = cutout_header["*FILTER*"][i]
+        except KeyError:
+            pass
+
+        return filter
 
 
-class AsdfCutoutHandler(CutoutHandler):
+class ASDFCutoutHandler(CutoutHandler):
+    """
+    Implementation of CutoutHandler for handling ASDF cutouts.
+    Uses the astrocut library to create and manage ASDF cutouts.
+    """
+
     def __init__(
         self,
         input_files: list[str],
@@ -534,6 +591,7 @@ class AsdfCutoutHandler(CutoutHandler):
         self,
         output_dir: str,
         cutout_prefix: str = "cutout",
+        colorize: bool = False,
     ) -> str:
         if self.cutout is None:
             self._make_cutout()
@@ -541,26 +599,59 @@ class AsdfCutoutHandler(CutoutHandler):
         img_fname = self.cutout.write_as_img(
             output_dir=output_dir,
             cutout_prefix=cutout_prefix,
+            colorize=colorize,
             stretch=STRETCH,
             minmax_percent=MINMAX_PERCENT,
         )[0]
         return img_fname
 
-    def get_filter(self) -> str | None:
+    def get_filter(self, i) -> str | None:
         """Get the filter info from the instrument metadata"""
         if self.cutout is None:
             self._make_cutout()
 
         filter = None
         try:
-            filter = self.cutout.asdf_cutouts[0]["roman"]["meta"]["instrument"]["optical_element"]
+            filter = self.cutout.asdf_cutouts[i]["roman"]["meta"]["instrument"]["optical_element"]
         except KeyError:
             pass
 
         return filter
 
 
-def generate_cutout(  # noqa: C901
+def setup_filesystem(output_dir: str) -> AbstractFileSystem:
+    """Set up the filesystem (S3 or local) for the given output directory.
+
+    For local filesystem, create the output directories.
+
+    Args:
+        output_dir (str): The output directory path.
+
+    Returns:
+        AbstractFileSystem: The filesystem object for the output directory.
+    """
+    fs: AbstractFileSystem
+    output_is_s3 = output_dir.startswith("s3://")
+    if output_is_s3:
+        fs = filesystem("s3")
+    else:
+        fs = filesystem("local")
+
+    # Only create directories for local filesystem; S3 doesn't need them
+    # and the isdir/mkdir calls are expensive LIST operations
+    try:
+        if not output_is_s3 and not fs.isdir(output_dir):
+            fs.mkdir(output_dir)
+    except FileExistsError:
+        logger.debug(f"Output directory already exists: {output_dir}")
+    except Exception as e:
+        logger.warning(f"Error creating output directory: {e}")
+        raise e
+
+    return fs
+
+
+def generate_cutout(
     source_file: str,
     target: TargetPosition,
     size: tuple[int, int],
@@ -592,25 +683,10 @@ def generate_cutout(  # noqa: C901
 
     cutout_path = urlparse(source_file).path
     cutout_prefix = Path(cutout_path).stem
+    # Determine the file extension for the cutout so we know which cutout handler to use (FITS or ASDF)
     cutout_extension = Path(cutout_path).suffix.lower()
 
-    fs: AbstractFileSystem
-    output_is_s3 = output_dir.startswith("s3://")
-    if output_is_s3:
-        fs = filesystem("s3")
-    else:
-        fs = filesystem("local")
-
-    # Only create directories for local filesystem; S3 doesn't need them
-    # and the isdir/mkdir calls are expensive LIST operations
-    try:
-        if not output_is_s3 and not fs.isdir(output_dir):
-            fs.mkdir(output_dir)
-    except FileExistsError:
-        logger.debug(f"Output directory already exists: {output_dir}")
-    except Exception as e:
-        logger.warning(f"Error creating output directory: {e}")
-        raise e
+    fs = setup_filesystem(output_dir)
 
     init_time = time.perf_counter()
 
@@ -621,15 +697,14 @@ def generate_cutout(  # noqa: C901
     img_fname = None
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
-        # TODO: detect input file extension/type
         if ".fits" == cutout_extension:
-            cutout_handler = FitsCutoutHandler(
+            cutout_handler = FITSCutoutHandler(
                 input_files=[source_file],
                 target=target,
                 size=size,
             )
         elif ".asdf" == cutout_extension:
-            cutout_handler = AsdfCutoutHandler(
+            cutout_handler = ASDFCutoutHandler(
                 input_files=[source_file],
                 target=target,
                 size=size,
@@ -642,7 +717,6 @@ def generate_cutout(  # noqa: C901
             cutout_fname = cutout_handler.make_cutout(temp_output_dir, cutout_prefix)
         cutout_write_time = time.perf_counter()
 
-        img_fname = None
         if generate_preview:
             img_fname = cutout_handler.make_preview(temp_output_dir, cutout_prefix)
         jpg_write_time = time.perf_counter()
@@ -715,7 +789,7 @@ def generate_cutout(  # noqa: C901
     )
     filter_val = metadata.get("filter")
     if not filter_val:
-        filter_val = cutout_handler.get_filter()
+        filter_val = cutout_handler.get_filter(0)
 
     mission_extras = {k: v for k, v in metadata.items() if k != "filter"}
     return CutoutResponse(
@@ -740,25 +814,34 @@ def generate_color_preview(
     """
     Generate a color preview of a cutout
     """
-    cutout_prefix = urlparse(red).path
-    cutout_prefix = Path(cutout_prefix).stem + "_color"
+    cutout_path = urlparse(red).path
+    cutout_prefix = Path(cutout_path).stem + "_color"
+    cutout_extension = Path(cutout_path).suffix.lower()
 
     start_time = time.perf_counter()
-    cutout = astrocut.FITSCutout(
-        input_files=[red, green, blue],
-        coordinates=SkyCoord(ra=target.ra, dec=target.dec, unit="deg", frame="icrs"),
-        cutout_size=size,
-        single_outfile=False,
-    )
+
+    if ".fits" == cutout_extension:
+        cutout_handler = FITSCutoutHandler(
+            input_files=[red, green, blue],
+            target=target,
+            size=size,
+        )
+    elif ".asdf" == cutout_extension:
+        cutout_handler = ASDFCutoutHandler(
+            input_files=[red, green, blue],
+            target=target,
+            size=size,
+        )
+    else:
+        raise ValueError(f"Unsupported output format: {cutout_extension}")
+
     astrocut_time = time.perf_counter()
 
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
-        img_fname = cutout.write_as_img(
+        img_fname = cutout_handler.make_preview(
             output_dir=temp_output_dir,
             cutout_prefix=cutout_prefix,
             colorize=True,
-            stretch=STRETCH,
-            minmax_percent=MINMAX_PERCENT,
         )
         write_time = time.perf_counter()
 
@@ -829,9 +912,9 @@ def generate_color_preview(
         position=target,
         size_px=size,
         filter=ColorFilter(
-            red=get_fits_filter(cutout.fits_cutouts[0]),
-            green=get_fits_filter(cutout.fits_cutouts[1]),
-            blue=get_fits_filter(cutout.fits_cutouts[2]),
+            red=cutout_handler.get_filter(0),
+            green=cutout_handler.get_filter(1),
+            blue=cutout_handler.get_filter(2),
         ),
         preview=img_fname,
     )
