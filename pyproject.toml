@@ -26,13 +26,21 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    {include-group = "test"},
     "isort>=7.0.0",
     "pre-commit>=4.3.0",
     "pyarrow-stubs>=20.0.0.20250928",
-    "pytest",
-    "pytest-cov",
     "ruff>=0.14.1",
 ]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=1.0",
+    "pytest-cov"
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [project.scripts]
 fornax-cutouts = "fornax_cutouts.cli:main"

@@ -15,11 +15,14 @@ from vo_models.uws.types import ExecutionPhase
 from vo_models.voresource.types import UTCTimestamp
 from vo_models.xlink import XlinkType
 
+from fornax_cutouts.auth import Principal, auth_registry
+from fornax_cutouts.auth.limits import CutoutLimiter
+from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, async_redis_client_factory
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
 from fornax_cutouts.sources import cutout_registry
-from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError
+from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
 from fornax_cutouts.utils.html_link import html_link
 from fornax_cutouts.utils.logging import get_logger
 
@@ -99,6 +102,7 @@ class CutoutsUWSHandler:
         request: Request,
         position: Annotated[list[str], Form()],
         size: Annotated[int, Form()],
+        principal: Annotated[Principal, Depends(auth_registry.resolve_principal)],
         output_format: Annotated[list[str], Form()] = ["fits"],
         run_id: Annotated[
             str,
@@ -143,6 +147,17 @@ class CutoutsUWSHandler:
 
         job_id = uuid.uuid4().hex[:8]
         uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
+        limiter = CutoutLimiter(self.redis_client)
+
+        # Reserve the minimum number of cutouts required by the request (positions)
+        try:
+            await limiter.reserve(principal, job_id, len(position))
+        except CutoutLimitExceededError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(exc),
+                headers={"Retry-After": str(exc.retry_after)},
+            )
 
         self.logger.info(
             "Creating UWS job",
@@ -152,17 +167,27 @@ class CutoutsUWSHandler:
                 "run_id": run_id,
                 "parameters": request_params,
                 "correlation_id": getattr(request.state, "correlation_id", None),
+                "identity": principal.identity,
+                "is_anonymous": principal.is_anonymous,
             },
         )
-        await uws_job.create_job(
-            run_id=run_id,
-            parameters=request_params,
-        )
+        try:
+            await uws_job.create_job(
+                run_id=run_id,
+                parameters=request_params,
+                identity=principal.identity,
+                cutout_limit=principal.cutout_limit if CONFIG.cutout_limit.enabled else None,
+                window_seconds=principal.window_seconds,
+            )
 
-        schedule_job.apply_async(
-            task_id=f"schedule_job-{job_id}",
-            kwargs={"job_id": job_id},
-        )
+            schedule_job.apply_async(
+                task_id=f"schedule_job-{job_id}",
+                kwargs={"job_id": job_id},
+            )
+        except Exception:
+            await limiter.release(principal.identity, job_id)
+            raise
+
         redirect_url = f"{request.url.path}/{job_id}"
         return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 

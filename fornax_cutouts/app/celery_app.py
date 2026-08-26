@@ -7,9 +7,9 @@ from celery.signals import setup_logging, worker_process_init, worker_process_sh
 from celery.worker import state as celery_worker_state
 from redis import Redis, RedisCluster
 
+from fornax_cutouts.app.discovery import discover_sources
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import sync_redis_client_factory
-from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.logging import get_logger, setup_worker_logging
 
 logger = get_logger()
@@ -96,7 +96,7 @@ def _register_worker_sigterm_handler():
 
 @worker_process_init.connect
 def setup_worker_process(**kwargs):
-    cutout_registry.discover_sources()
+    discover_sources()
 
     redis_client_factory()
     logger.debug("Redis client setup complete")

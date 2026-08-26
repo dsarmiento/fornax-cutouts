@@ -16,7 +16,9 @@ from redis.commands.search.field import NumericField, TagField
 from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, Parameters, ShortJobDescription
+from vo_models.uws.types import ErrorType
 
+from fornax_cutouts.auth.registry import _UNKNOWN_CLIENT_BUCKET
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.uws import create_job_summary, create_parameters
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError
@@ -26,6 +28,7 @@ JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "
 CUTOUT_INDEX_NAME = "cutoutJobsIdx"
 CUTOUT_JOB_PREFIX = f"{CONFIG.worker.redis_prefix}:jobs"
 TOTAL_PENDING_TASKS_KEY = f"{CONFIG.worker.redis_prefix}:total_pending_tasks"
+CUTOUT_LIMIT_PREFIX = f"{CONFIG.worker.redis_prefix}:cutout_limit"
 POSITIONS_BATCH_SIZE = 100_000
 
 
@@ -40,6 +43,18 @@ class RedisKeys:
     @property
     def positions(self):
         return f"{self.uws}:positions"
+
+    @property
+    def cutout_limit_identity(self):
+        return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:cutout_limit_identity"
+
+    @property
+    def cutout_limit_max(self):
+        return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:cutout_limit_max"
+
+    @property
+    def cutout_limit_window_seconds(self):
+        return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:cutout_limit_window_seconds"
 
     @property
     def pending_tasks(self):
@@ -84,6 +99,26 @@ class RedisKeys:
 
     def batch_started(self, batch_num: int) -> str:
         return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:batch:{batch_num}:started"
+
+
+@dataclass
+class CutoutLimitKeys:
+    """
+    Redis keys for one identity's rolling-window cutout budget.
+
+    Both keys share a `{identity}` hash tag so the reserve/reconcile/release Lua scripts stay
+    single-slot under Redis Cluster.
+    """
+
+    identity: str
+
+    @property
+    def events(self):
+        return f"{CUTOUT_LIMIT_PREFIX}:{{{self.identity}}}:events"
+
+    @property
+    def counts(self):
+        return f"{CUTOUT_LIMIT_PREFIX}:{{{self.identity}}}:counts"
 
 
 def recalculate_total_pending_tasks(redis_client: SyncRedisClient | SyncRedisCluster) -> int:
@@ -235,7 +270,26 @@ class AsyncRedisCutoutJob:
     async def __set_destruction(self, destruction: datetime):
         await self.__set_time(time_field="destruction", time=destruction)
 
-    async def create_job(self, run_id: str | None = None, parameters: dict = {}):
+    async def create_job(
+        self,
+        run_id: str | None = None,
+        parameters: dict = {},
+        identity: str = _UNKNOWN_CLIENT_BUCKET,
+        cutout_limit: int | None = None,
+        window_seconds: int | None = None,
+    ):
+        """
+        Create a new aysnc cutout job in the Redis database by setting the UWS job object and job metadata.
+        If enabled, set the cutout limit and window seconds.
+
+        Args:
+            run_id (str | None): Optional run ID to associate with the job from the UWS spec.
+            parameters (dict): Dictionary of job parameters, including "position" key (list) for batch tasks.
+            identity (str): Identity string for cutout limit tracking (default: _UNKNOWN_CLIENT_BUCKET).
+            cutout_limit (int | None): Optional maximum number of cutouts allowed within window.
+            window_seconds (int | None): Optional time window (seconds) limiting cutout rate.
+        """
+
         job_obj = {
             "job_id": self.job_id,
             "phase": ExecutionPhase.PENDING,
@@ -246,12 +300,14 @@ class AsyncRedisCutoutJob:
             job_obj["run_id"] = run_id
 
         if parameters:
+            # Extract the positions from the parameters as this can be a large list.
             positions_obj = parameters.pop("position", [])
             parameters["position_count"] = len(positions_obj)
             job_obj["parameters"] = parameters
 
         await self.__update_uws(path="$", obj=job_obj)
 
+        # Push the positions to the Redis positions queue in batches.
         async with self.__redis_client.pipeline() as pipe:
             for idx in range(0, len(positions_obj), POSITIONS_BATCH_SIZE):
                 batch_positions = positions_obj[idx : idx + POSITIONS_BATCH_SIZE]
@@ -266,6 +322,11 @@ class AsyncRedisCutoutJob:
             pipe.set(self.__keys.executing_task_count, 0)
             pipe.set(self.__keys.completed_task_count, 0)
             pipe.set(self.__keys.current_batch_num, 0)
+            pipe.set(self.__keys.cutout_limit_identity, identity)
+            if cutout_limit is not None:
+                pipe.set(self.__keys.cutout_limit_max, cutout_limit)
+            if window_seconds is not None:
+                pipe.set(self.__keys.cutout_limit_window_seconds, window_seconds)
             await pipe.execute()
 
     async def get_job_summary(self, base_url: str = "") -> JobSummary:
@@ -366,15 +427,39 @@ class SyncRedisCutoutJob:
         job_parameters = self.__redis_client.json().get(self.__keys.uws, "$.parameters")
         return job_parameters[0]
 
+    def get_cutout_limit_budget(self) -> tuple[str | None, int | None, int | None]:
+        """
+        The (identity, cutout_limit, window_seconds) snapshotted at job creation.
+
+        `cutout_limit`/`window_seconds` are None when the principal was unlimited (or cutout
+        limiting was disabled), signaling the worker doesn't need to recheck on reconcile.
+        """
+        with self.__redis_client.pipeline() as pipe:
+            pipe.get(self.__keys.cutout_limit_identity)
+            pipe.get(self.__keys.cutout_limit_max)
+            pipe.get(self.__keys.cutout_limit_window_seconds)
+            identity, cutout_limit, window_seconds = pipe.execute()
+
+        return (
+            identity,
+            int(cutout_limit) if cutout_limit is not None else None,
+            int(window_seconds) if window_seconds is not None else None,
+        )
+
     def scan_job_positions(self) -> Generator[list[str], None, None]:
+        """
+        Scan the job positions in batches of `POSITIONS_BATCH_SIZE`.
+        """
         start = 0
         while True:
             end = start + POSITIONS_BATCH_SIZE - 1
             batch = self.__redis_client.lrange(self.__keys.positions, start, end)
             if not batch:
+                # No more positions to scan.
                 break
             yield batch
             if len(batch) < POSITIONS_BATCH_SIZE:
+                # Last batch is less than `POSITIONS_BATCH_SIZE`; we are done scanning.
                 break
             start += POSITIONS_BATCH_SIZE
 
@@ -393,6 +478,15 @@ class SyncRedisCutoutJob:
     def push_pending_tasks(self, all_task_kwargs: list[dict]):
         all_tasks = [json_dumps_with_encoders(task_kwargs) for task_kwargs in all_task_kwargs]
         self.__redis_client.rpush(self.__keys.pending_tasks, *all_tasks)
+
+    def clear_pending_tasks(self) -> int:
+        """Discard all not-yet-dispatched pending tasks for this job; returns how many were removed."""
+        with self.__redis_client.pipeline() as pipe:
+            pipe.llen(self.__keys.pending_tasks)
+            pipe.delete(self.__keys.pending_tasks)
+            count, _ = pipe.execute()
+
+        return count
 
     def push_failed_task(self, task_kwargs: dict, error_message: str):
         task_kwargs["error_message"] = error_message
@@ -542,6 +636,17 @@ class SyncRedisCutoutJob:
     def complete_job(self):
         self.update_job_phase(ExecutionPhase.COMPLETED)
         self.set_end_time()
+
+    def fail_job(self, message: str, error_type: ErrorType = ErrorType.FATAL):
+        """Terminally fail the job (e.g. cutout limit exceeded) with an error summary."""
+        self.__update_uws(
+            path="$.error_summary",
+            obj={"message": message, "type": error_type, "has_detail": False},
+        )
+        self.update_job_phase(ExecutionPhase.ERROR)
+        self.set_end_time()
+        cleared = self.clear_pending_tasks()
+        self.decrement_total_pending_tasks(cleared)
 
     def get_job_result_status(self):
         with self.__redis_client.pipeline() as pipe:
