@@ -690,11 +690,11 @@ def generate_cutout(
 
     init_time = time.perf_counter()
 
+    cutout_fname = ""
+    img_fname = ""
     science_bytes = 0
     preview_bytes = 0
 
-    cutout_fname = None
-    img_fname = None
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
         if ".fits" == cutout_extension:
