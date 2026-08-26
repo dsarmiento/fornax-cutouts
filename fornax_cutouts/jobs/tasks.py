@@ -1,12 +1,12 @@
 import gc
 import time
+from abc import abstractmethod
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
-import asdf
 import astrocut
 from astropy.coordinates import SkyCoord
 from astropy.io.fits.hdu.hdulist import HDUList
@@ -411,17 +411,6 @@ def write_results(self: Task, job_id: str, batch_num: int):
         r.delete_batch_keys(batch_num)
 
 
-def get_asdf_filter(asdf_cutout: asdf.AsdfFile) -> str | None:
-    """Get the filter info from the instrument metadata"""
-    filter = None
-    try:
-        filter = asdf_cutout["roman"]["meta"]["instrument"]["optical_element"]
-    except KeyError:
-        pass
-
-    return filter
-
-
 def get_fits_filter(fits_cutout: HDUList) -> str | None:
     filter = None
     try:
@@ -433,12 +422,152 @@ def get_fits_filter(fits_cutout: HDUList) -> str | None:
     return filter
 
 
+class CutoutHandler:
+    def __init__(self):
+        pass
+
+    @abstractmethod
+    def make_cutout(
+        self,
+        source_file: str,
+        target: TargetPosition,
+        size: tuple[int, int],
+        output_dir: str,
+        cutout_prefix: str | None = None,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    def get_filter(self, cutout) -> str | None:
+        pass
+
+
+class FitsCutoutHandler(CutoutHandler):
+    def __init__(
+        self,
+        input_files: list[str],
+        target: TargetPosition,
+        size: tuple[int, int],
+    ):
+        self.input_files = input_files
+        self.coordinate = SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs")
+        self.size = size
+        self.fits_cutout = None
+
+    def _make_cutout(self):
+        self.fits_cutout = astrocut.FITSCutout(
+            input_files=self.input_files,
+            coordinates=self.coordinate,
+            cutout_size=self.size,
+            single_outfile=False,
+        )
+
+    def make_cutout(
+        self,
+        output_dir: str,
+        cutout_prefix: str = "cutout",
+    ) -> str:
+        if self.fits_cutout is None:
+            self._make_cutout()
+        fits_fname = self.fits_cutout.write_as_fits(
+            output_dir=output_dir,
+            cutout_prefix=cutout_prefix,
+        )[0]
+
+        # science_bytes = Path(fits_fname).stat().st_size
+        # fits_write_time = time.perf_counter()
+        return fits_fname
+
+    def make_preview(
+        self,
+        output_dir: str,
+        cutout_prefix: str = "cutout",
+    ) -> str:
+        if self.fits_cutout is None:
+            self._make_cutout()
+        img_fname = self.fits_cutout.write_as_img(
+            output_dir=output_dir,
+            cutout_prefix=cutout_prefix,
+            stretch=STRETCH,
+            minmax_percent=MINMAX_PERCENT,
+        )[0]
+        return img_fname
+
+    def get_filter(self) -> str | None:
+        if self.fits_cutout is None:
+            self._make_cutout()
+        return get_fits_filter(self.fits_cutout.fits_cutouts[0])
+
+
+class AsdfCutoutHandler(CutoutHandler):
+    def __init__(
+        self,
+        input_files: list[str],
+        target: TargetPosition,
+        size: tuple[int, int],
+    ):
+        self.input_files = input_files
+        self.coordinate = SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs")
+        self.size = size
+        self.asdf_cutout = None
+
+    def _make_cutout(self):
+        self.asdf_cutout = astrocut.ASDFCutout(
+            input_files=self.input_files,
+            coordinates=self.coordinate,
+            cutout_size=self.size,
+        )
+
+    def make_cutout(
+        self,
+        output_dir: str,
+        cutout_prefix: str = "cutout",
+    ) -> str:
+        if self.asdf_cutout is None:
+            self._make_cutout()
+
+        asdf_fname = self.asdf_cutout.write_as_asdf(
+            output_dir=output_dir,
+        )[0]
+        return asdf_fname
+
+    def make_preview(
+        self,
+        output_dir: str,
+        cutout_prefix: str = "cutout",
+    ) -> str:
+        if self.asdf_cutout is None:
+            self._make_cutout()
+
+        img_fname = self.asdf_cutout.write_as_img(
+            output_dir=output_dir,
+            cutout_prefix=cutout_prefix,
+            stretch=STRETCH,
+            minmax_percent=MINMAX_PERCENT,
+        )[0]
+        return img_fname
+
+    def get_filter(self) -> str | None:
+        """Get the filter info from the instrument metadata"""
+        if self.asdf_cutout is None:
+            self._make_cutout()
+
+        filter = None
+        try:
+            filter = self.asdf_cutout.asdf_cutouts[0]["roman"]["meta"]["instrument"]["optical_element"]
+        except KeyError:
+            pass
+
+        return filter
+
+
 def generate_cutout(  # noqa: C901
     source_file: str,
     target: TargetPosition,
     size: tuple[int, int],
-    output_format: list[str],
     output_dir: str,
+    generate_science: bool = True,
+    generate_preview: bool = False,
     mission: str = "sync_cutout",
     metadata: dict = {},
     job_id: str = "",
@@ -450,8 +579,11 @@ def generate_cutout(  # noqa: C901
         source_file (str): Source file
         target (TargetPosition): Target to center the cutout around
         size (tuple[int, int]): Size of the cutout
-        output_format (list[str]): Formats of the resulting files (fits, jp(e)g)
         output_dir (str): Destination directory.
+        generate_science (bool, optional): Set to true to generate science cutout file. Supports FITS and ASDF formats.
+            Defaults to True.
+        generate_preview (str, optional): Set to true to generate jpeg preview file.
+            Defaults to False.
         mission (str, optional): The mission name (e.g., "ps1").
             Defaults to "sync_cutout".
         metadata (dict, optional): Mission-specific metadata dictionary.
@@ -459,8 +591,9 @@ def generate_cutout(  # noqa: C901
     """
     start_time = time.perf_counter()
 
-    cutout_prefix = urlparse(source_file).path
-    cutout_prefix = Path(cutout_prefix).stem
+    cutout_path = urlparse(source_file).path
+    cutout_prefix = Path(cutout_path).stem
+    cutout_extension = Path(cutout_path).suffix.lower()
 
     fs: AbstractFileSystem
     output_is_s3 = output_dir.startswith("s3://")
@@ -482,70 +615,44 @@ def generate_cutout(  # noqa: C901
 
     init_time = time.perf_counter()
 
-    fits_fname = ""
-    img_fname = ""
-    asdf_fname = ""
     science_bytes = 0
     preview_bytes = 0
-    science_out_format = ""
-    preview_out_format = ""
 
+    cutout_fname = None
+    img_fname = None
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
         # TODO: detect input file extension/type
-        if "fits" in output_format:
-            cutout = astrocut.FITSCutout(
-                input_files=source_file,
-                coordinates=SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs"),
-                cutout_size=size,
-                single_outfile=False,
+        if ".fits" == cutout_extension:
+            cutout_handler = FitsCutoutHandler(
+                input_files=[source_file],
+                target=target,
+                size=size,
             )
-        elif "asdf" in output_format:
-            cutout = astrocut.ASDFCutout(
-                input_files=source_file,
-                coordinates=SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs"),
-                cutout_size=size,
+        elif ".asdf" == cutout_extension:
+            cutout_handler = AsdfCutoutHandler(
+                input_files=[source_file],
+                target=target,
+                size=size,
             )
         else:
-            raise ValueError(f"Unsupported output format: {output_format}")
+            raise ValueError(f"Unsupported output format: {cutout_extension}")
 
         astrocut_init_time = time.perf_counter()
+        if generate_science:
+            cutout_fname = cutout_handler.make_cutout(temp_output_dir, cutout_prefix)
+        cutout_write_time = time.perf_counter()
 
-        if "fits" in output_format:
-            science_out_format = "fits"
-            fits_fname = cutout.write_as_fits(
-                output_dir=temp_output_dir,
-                cutout_prefix=cutout_prefix,
-            )[0]
-        fits_write_time = time.perf_counter()
-        if "asdf" in output_format:
-            science_out_format = "asdf"
-            asdf_fname = cutout.write_as_asdf(
-                output_dir=temp_output_dir,
-            )[0]
-        asdf_write_time = time.perf_counter()
-        if "jpg" in output_format or "jpeg" in output_format:
-            preview_out_format = "jpeg"
-            img_fname = cutout.write_as_img(
-                output_dir=temp_output_dir,
-                cutout_prefix=cutout_prefix,
-                stretch=STRETCH,
-                minmax_percent=MINMAX_PERCENT,
-            )[0]
+        img_fname = None
+        if generate_preview:
+            img_fname = cutout_handler.make_preview(temp_output_dir, cutout_prefix)
         jpg_write_time = time.perf_counter()
 
-        # TODO: Do we ever need to handle multiple science files at once?
-        if fits_fname:
-            science_bytes = Path(fits_fname).stat().st_size
-            fits_dest_fname = fits_fname.replace(temp_output_dir, output_dir)
-            fs.put(lpath=fits_fname, rpath=fits_dest_fname)
-            fits_fname = fits_dest_fname
-
-        if asdf_fname:
-            science_bytes = Path(asdf_fname).stat().st_size
-            asdf_dest_fname = asdf_fname.replace(temp_output_dir, output_dir)
-            fs.put(lpath=asdf_fname, rpath=asdf_dest_fname)
-            asdf_fname = asdf_dest_fname
+        if cutout_fname:
+            science_bytes = Path(cutout_fname).stat().st_size
+            dest_fname = cutout_fname.replace(temp_output_dir, output_dir)
+            fs.put(lpath=cutout_fname, rpath=dest_fname)
+            cutout_fname = dest_fname
 
         if img_fname:
             preview_bytes = Path(img_fname).stat().st_size
@@ -566,22 +673,16 @@ def generate_cutout(  # noqa: C901
         "total": round(end_time - start_time, 4),
     }
 
-    if fits_fname:
-        output_formats["science"] = science_out_format
+    if cutout_fname:
+        output_formats["science"] = cutout_extension.lstrip(".")
         bytes["science"] = science_bytes
-        timings_s["science_write"] = round(fits_write_time - astrocut_init_time, 4)
-        science_fname = fits_fname
-
-    if asdf_fname:
-        output_formats["science"] = science_out_format
-        bytes["science"] = science_bytes
-        timings_s["science_write"] = round(asdf_write_time - astrocut_init_time, 4)
-        science_fname = asdf_fname
+        timings_s["science_write"] = round(cutout_write_time - astrocut_init_time, 4)
+        science_fname = cutout_fname
 
     if img_fname:
-        output_formats["preview"] = preview_out_format
+        output_formats["preview"] = "jpg"
         bytes["preview"] = preview_bytes
-        timings_s["preview_write"] = round(jpg_write_time - fits_write_time, 4)
+        timings_s["preview_write"] = round(jpg_write_time - cutout_write_time, 4)
 
     logger.info(
         f"Job {job_id} cutout generated: mission='{mission}' source='{source_file}' size={size[0]}x{size[1]}px",
@@ -615,11 +716,7 @@ def generate_cutout(  # noqa: C901
     )
     filter_val = metadata.get("filter")
     if not filter_val:
-        if fits_fname:
-            filter_val = get_fits_filter(cutout.fits_cutouts[0])
-    if not filter_val:
-        if asdf_fname:
-            filter_val = get_asdf_filter(cutout.asdf_cutouts[0])
+        filter_val = cutout_handler.get_filter()
 
     mission_extras = {k: v for k, v in metadata.items() if k != "filter"}
     return CutoutResponse(
@@ -780,7 +877,8 @@ def execute_cutout(  # noqa: C901
     source_file: str,
     target: TargetPosition | list[float],
     size: int | tuple[int, int],
-    output_format: list[str],
+    generate_science: bool = True,
+    generate_preview: bool = False,
     output_dir: str = "",
     mission: str = "",
     metadata: dict = {},
@@ -825,7 +923,8 @@ def execute_cutout(  # noqa: C901
             source_file=source_file,
             target=target,
             size=size,
-            output_format=output_format,
+            generate_science=generate_science,
+            generate_preview=generate_preview,
             output_dir=output_dir,
             mission=mission,
             metadata=metadata,
@@ -864,7 +963,8 @@ def execute_cutout(  # noqa: C901
                     "source_file": source_file,
                     "target": target,
                     "size": size,
-                    "output_format": output_format,
+                    "generate_science": generate_science,
+                    "generate_preview": generate_preview,
                     "output_dir": output_dir,
                     "mission": mission,
                     "metadata": metadata,
