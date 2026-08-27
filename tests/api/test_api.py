@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from fornax_cutouts.app.api import main_app
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import FilenameLookupResponse, FilenameWithMetadata
-from fornax_cutouts.models.metadata import FilenameRequest
+from fornax_cutouts.models.metadata import FilenameRequest, MultiMissionCutoutRequest
 from fornax_cutouts.sources import AbstractMissionSource, MissionMetadata, cutout_registry
 
 
@@ -44,19 +44,24 @@ class TestAPIInputFormats:
         mock_instance = mock_job.return_value
         mock_instance.create_job = mock.AsyncMock(return_value="job123")
 
-        # Send a request to the /filenames endpoint
-        file_name_request = FilenameRequest(survey=["c"], filter=["a"]).model_dump()
-        form_data = {"fake_source": json.dumps(file_name_request), "position": ["m101"], "size": 4}
-        response = self.client.post("/api/v0/filenames", data=form_data)
-        assert response.status_code == 200
+        # make a MultimissionCutoutRequest to the /async endpoint
+        filename_request = FilenameRequest(survey=["c"], filter=["a"])
+        cutout_request = MultiMissionCutoutRequest(
+            missions={"fake_source": filename_request}, position=["m101"], size=4
+        ).model_dump()
+        # convert cutout_request to form data by json encoding any dict values
+        form_data = {k: json.dumps(v) if isinstance(v, dict) else v for k, v in cutout_request.items()}
 
-        # Check that we can send the same FilenameRequest to the async cutout endpoint
         response = self.client.post("api/v0/cutouts/async", data=form_data, follow_redirects=False)
         assert response.status_code == 303
 
         # Get the job id from the mock and check that we redirected to that location
         job_id = mock_job.call_args.kwargs["job_id"]
         assert response.headers["location"] == f"/api/v0/cutouts/async/{job_id}"
+
+        # Check that we can send the same request to the /filenames endpoint
+        response = self.client.post("/api/v0/filenames", data=form_data)
+        assert response.status_code == 200
 
     @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
     def test_file_name_request_invalid_rejected(self, mock_job):
