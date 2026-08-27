@@ -14,7 +14,7 @@ from fornax_cutouts.sources import AbstractMissionSource, MissionMetadata, cutou
 
 
 # Register a fake source for testing
-@cutout_registry.register_source()
+@cutout_registry.register_source
 class FakeSource(AbstractMissionSource):
     metadata: MissionMetadata = MissionMetadata(
         name="fake_source",
@@ -37,9 +37,8 @@ class TestAPIInputFormats:
     client = TestClient(main_app)
 
     @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
-    def test_file_name_request_valid_across_apis(self, mock_job):
-        """Test that the mission parameters passed to the /filenames endpoint is valid when passed as a JSON string
-        to the /async endpoint"""
+    def test_same_request_filenames_async(self, mock_job):
+        """Test that the same request works for the /filenames endpoint and the /async endpoint"""
 
         # Mock the job creation for the async cutout endpoint
         mock_instance = mock_job.return_value
@@ -47,13 +46,12 @@ class TestAPIInputFormats:
 
         # Send a request to the /filenames endpoint
         file_name_request = FilenameRequest(survey=["c"], filter=["a"]).model_dump()
-        request_data = {"position": ["m101"], "mission": {"fake_source": file_name_request}}
-        response = self.client.post("/api/v0/filenames", json=request_data)
+        form_data = {"fake_source": json.dumps(file_name_request), "position": ["m101"], "size": 4}
+        response = self.client.post("/api/v0/filenames", data=form_data)
         assert response.status_code == 200
 
         # Check that we can send the same FilenameRequest to the async cutout endpoint
-        async_form_data = {"fake_source": json.dumps(file_name_request), "position": ["m101"], "size": 4}
-        response = self.client.post("api/v0/cutouts/async", data=async_form_data, follow_redirects=False)
+        response = self.client.post("api/v0/cutouts/async", data=form_data, follow_redirects=False)
         assert response.status_code == 303
 
         # Get the job id from the mock and check that we redirected to that location
