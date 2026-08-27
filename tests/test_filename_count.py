@@ -81,7 +81,7 @@ def test_mission_count_default_uses_get_filenames():
 
     response = _client().post(
         "/api/v0/filenames/fake/count",
-        json={"position": ["10.0 20.0"], "filter": ["g"]},
+        data={"position": ["10.0 20.0"], "filter": ["g"]},
     )
 
     assert response.status_code == 200
@@ -96,7 +96,7 @@ def test_mission_count_uses_get_count():
 
     response = _client().post(
         "/api/v0/filenames/fake/count",
-        json={"position": ["10.0 20.0"], "filter": ["g"]},
+        data={"position": ["10.0 20.0"], "filter": ["g"]},
     )
 
     assert response.status_code == 200
@@ -108,7 +108,7 @@ def test_mission_count_uses_get_count():
 
 def test_count_unknown_mission_is_404():
     client = _client()
-    response = client.post("/api/v0/filenames/missing/count", json={"position": ["10.0 20.0"]})
+    response = client.post("/api/v0/filenames/missing/count", data={"position": ["10.0 20.0"]})
     assert response.status_code == 404
 
 
@@ -179,7 +179,7 @@ def test_single_mission_filenames_route():
 
     response = _client().post(
         "/api/v0/filenames/fake",
-        json={"position": ["10.0 20.0"], "filter": ["g"]},
+        data={"position": ["10.0 20.0"], "filter": ["g"]},
     )
 
     assert response.status_code == 200

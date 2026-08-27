@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Form, HTTPException, status
+from fastapi import APIRouter, Form, HTTPException, status
 from fastapi_utils.cbv import cbv
 
 from fornax_cutouts.models.metadata import (
@@ -72,7 +72,7 @@ class MetadataHandler:
     def get_mission_filenames_count(
         self,
         mission: str,
-        fname_request: Annotated[FilenameRequest, Body()],
+        fname_request: Annotated[FilenameRequest, Form()],
     ):
         """Count matching files for a single mission."""
         if fname_request.position is None:
@@ -182,7 +182,7 @@ class MetadataHandler:
     def get_mission_filenames(
         self,
         mission: str,
-        fname_request: Annotated[FilenameRequest, Body()],
+        fname_request: Annotated[FilenameRequest, Form()],
     ):
         if fname_request.position is None:
             raise ValueError("'position' cannot be null")
