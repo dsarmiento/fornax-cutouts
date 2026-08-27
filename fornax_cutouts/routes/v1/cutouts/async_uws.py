@@ -19,7 +19,7 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, async_redis_client_factory
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
-from fornax_cutouts.models.metadata import MultimissionCutoutRequest
+from fornax_cutouts.models.metadata import MultiMissionCutoutRequest
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
 from fornax_cutouts.utils.html_link import html_link
 from fornax_cutouts.utils.logging import get_logger
@@ -99,7 +99,7 @@ class CutoutsUWSHandler:
         self,
         request: Request,
         principal: Annotated[Principal, Depends(auth_registry.resolve_principal)],
-        multimission_request: Annotated[MultimissionCutoutRequest, Form()],
+        multimission_request: Annotated[MultiMissionCutoutRequest, Form()],
     ):
         position = multimission_request.position
         size = multimission_request.size

@@ -15,7 +15,7 @@ class FilenameRequest(BaseModel):
         extra = "allow"
 
 
-class MultimissionRequest(BaseModel):
+class MultiMissionRequest(BaseModel):
     """
     Request across multiple missions. Accepts source data at the top level and in dot notation, e.g.
     {
@@ -75,7 +75,7 @@ class MultimissionRequest(BaseModel):
         return input_dict_new
 
 
-class MultimissionCutoutRequest(MultimissionRequest):
+class MultiMissionCutoutRequest(MultiMissionRequest):
     """Cutout request across multiple missions."""
 
     size: int

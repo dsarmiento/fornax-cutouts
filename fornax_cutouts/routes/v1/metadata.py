@@ -7,7 +7,7 @@ from fornax_cutouts.models.metadata import (
     FilenameCountResponse,
     FilenameRequest,
     MultiMissionFilenameCountResponse,
-    MultimissionRequest,
+    MultiMissionRequest,
 )
 from fornax_cutouts.sources import AbstractMissionSource, cutout_registry
 from fornax_cutouts.utils.santa_resolver import resolve_positions
@@ -101,7 +101,7 @@ class MetadataHandler:
     )
     def get_filenames(
         self,
-        multimission_request: Annotated[MultimissionRequest, Form()],
+        multimission_request: Annotated[MultiMissionRequest, Form()],
     ):
         mission_result = {}
         total_files = 0
@@ -146,7 +146,7 @@ class MetadataHandler:
     )
     async def get_filenames_count(
         self,
-        multimission_request: Annotated[MultimissionRequest, Form()],
+        multimission_request: Annotated[MultiMissionRequest, Form()],
     ):
         mission_result = {}
         total_files = 0
