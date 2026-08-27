@@ -1,7 +1,7 @@
 import logging
 import uuid
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Path, Query, Request, Response, status
@@ -19,10 +19,10 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, async_redis_client_factory
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
+from fornax_cutouts.models.metadata import MultimissionCutoutRequest
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
 from fornax_cutouts.utils.html_link import html_link
 from fornax_cutouts.utils.logging import get_logger
-from fornax_cutouts.utils.params import parse_mission_params_form
 
 uws_router = APIRouter(prefix="/cutouts", tags=["Async Cutouts (UWS)"])
 
@@ -98,20 +98,14 @@ class CutoutsUWSHandler:
     async def post_job(
         self,
         request: Request,
-        position: Annotated[list[str], Form()],
-        size: Annotated[int, Form()],
         principal: Annotated[Principal, Depends(auth_registry.resolve_principal)],
-        mission_params: Annotated[dict[str, dict[str, Any]], Depends(parse_mission_params_form)],
-        output_format: Annotated[list[str], Form()] = ["fits"],
-        run_id: Annotated[
-            str,
-            Form(
-                max_length=64,
-                description="RUNID for the request",
-                alias="RUNID",
-            ),
-        ] = "",
+        multimission_request: Annotated[MultimissionCutoutRequest, Form()],
     ):
+        position = multimission_request.position
+        size = multimission_request.size
+        output_format = multimission_request.output_format
+        run_id = multimission_request.run_id
+        mission_params = multimission_request.missions
         request_params = {
             "position": position,
             "size": size,

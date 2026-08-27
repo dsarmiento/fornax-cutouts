@@ -76,5 +76,5 @@ class TestAPIInputFormats:
         assert "detail" in response_body
         assert len(response_body["detail"]) == 2
         assert response_body["detail"][0]["type"] == "list_type"
-        assert response_body["detail"][0]["loc"] == ["survey"]
+        assert response_body["detail"][0]["loc"] == ["body", "missions", "fake_source", "survey"]
         assert response_body["detail"][0]["msg"] == "Input should be a valid list"
