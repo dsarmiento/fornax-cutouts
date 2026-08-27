@@ -1,16 +1,12 @@
-import json
 import logging
 import uuid
-from collections import defaultdict
 from enum import StrEnum
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Path, Query, Request, Response, status
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import RedirectResponse
 from fastapi_utils.cbv import cbv
-from pydantic import ValidationError
 from redis.asyncio import Redis, RedisCluster
 from vo_models.uws.models import Jobs, JobSummary, Parameters, ResultReference, Results
 from vo_models.uws.types import ExecutionPhase
@@ -23,11 +19,10 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, async_redis_client_factory
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
-from fornax_cutouts.models.metadata import FilenameRequest
-from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
 from fornax_cutouts.utils.html_link import html_link
 from fornax_cutouts.utils.logging import get_logger
+from fornax_cutouts.utils.params import parse_mission_params_form
 
 uws_router = APIRouter(prefix="/cutouts", tags=["Async Cutouts (UWS)"])
 
@@ -106,6 +101,7 @@ class CutoutsUWSHandler:
         position: Annotated[list[str], Form()],
         size: Annotated[int, Form()],
         principal: Annotated[Principal, Depends(auth_registry.resolve_principal)],
+        mission_params: Annotated[dict[str, dict[str, Any]], Depends(parse_mission_params_form)],
         output_format: Annotated[list[str], Form()] = ["fits"],
         run_id: Annotated[
             str,
@@ -116,42 +112,6 @@ class CutoutsUWSHandler:
             ),
         ] = "",
     ):
-        form = await request.form()
-
-        mission_params: dict[str, dict[str, Any]] = defaultdict(dict)
-        source_names = cutout_registry.get_source_names()
-
-        for key, value in form.multi_items():
-            # Case 1: key is a source name with JSON string value
-            if key in source_names:
-                mission_params[key].update(json.loads(value))
-            # Case 2: key is in format "source_name.parameter"
-            elif "." in key:
-                parts = key.split(".", 1)  # Split only on first dot
-                source_name = parts[0]
-                param_name = parts[1]
-
-                if source_name not in source_names:
-                    continue
-
-                if param_name not in mission_params[source_name]:
-                    mission_params[source_name][param_name] = value
-                elif not isinstance(mission_params[source_name][param_name], list):
-                    mission_params[source_name][param_name] = [mission_params[source_name][param_name], value]
-                else:
-                    mission_params[source_name][param_name].append(value)
-
-        # Validate mission parameters using FilenameRequest to make sure this endpoint is consistent with the
-        # /filenames endpoint in metadata.py
-        try:
-            for source_name, params in mission_params.items():
-                if source_name in cutout_registry.get_source_names():
-                    # Note: FilenameRequest has no required fields and by default allows extra fields
-                    # so this check is limited
-                    FilenameRequest.model_validate(params)
-        except ValidationError as e:
-            raise RequestValidationError(e.errors())
-
         request_params = {
             "position": position,
             "size": size,

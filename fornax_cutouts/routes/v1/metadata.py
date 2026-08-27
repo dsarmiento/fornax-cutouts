@@ -1,10 +1,11 @@
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter, Body, Depends, Form, HTTPException, status
 from fastapi_utils.cbv import cbv
 
 from fornax_cutouts.models.metadata import FilenameCountResponse, FilenameRequest, MultiMissionFilenameCountResponse
 from fornax_cutouts.sources import AbstractMissionSource, cutout_registry
+from fornax_cutouts.utils.params import parse_mission_params_form
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 metadata_router = APIRouter(tags=["Metadata"])
@@ -96,19 +97,16 @@ class MetadataHandler:
     )
     def get_filenames(
         self,
-        position: Annotated[list[str], Body()],
-        mission: Annotated[dict[str, FilenameRequest] | list[str], Body()],
+        position: Annotated[list[str], Form()],
+        mission_params: Annotated[dict[str, dict[str, Any]], Depends(parse_mission_params_form)],
     ):
         mission_result = {}
         total_files = 0
 
         resolved_positions = resolve_positions(position)
 
-        mission = _normalize_mission_map(mission)
-
         # TODO: Make this portion call get_filenames in parallel once serving more than one mission
-        for mission_name, fname_request in mission.items():
-            request_dict = _filename_params(fname_request)
+        for mission_name, request_dict in mission_params.items():
             request_dict["position"] = resolved_positions
 
             mission_source = cutout_registry.get_mission(mission_name)
@@ -128,7 +126,7 @@ class MetadataHandler:
         return {
             "request": {
                 "position": position,
-                "mission": mission,
+                "mission": mission_params,
             },
             "total_files": total_files,
             "missions": mission_result,
@@ -140,22 +138,20 @@ class MetadataHandler:
         description="Resolve positions and return matching file counts for one or more missions.",
         response_model=MultiMissionFilenameCountResponse,
     )
-    def get_filenames_count(
+    async def get_filenames_count(
         self,
-        position: Annotated[list[str], Body()],
-        mission: Annotated[dict[str, FilenameRequest] | list[str], Body()],
+        position: Annotated[list[str], Form()],
+        mission_params: Annotated[dict[str, dict[str, Any]], Depends(parse_mission_params_form)],
     ):
         mission_result = {}
         total_files = 0
 
         resolved_positions = resolve_positions(position)
-        mission = _normalize_mission_map(mission)
-
-        for mission_name, fname_request in mission.items():
+        for mission_name, request_dict in mission_params.items():
             mission_source = _get_mission_or_404(mission_name)
             mission_total_files = mission_source.get_count(
                 position=resolved_positions,
-                **_filename_params(fname_request),
+                **request_dict,
             )
             total_files += mission_total_files
             mission_result[mission_name] = {"total_files": mission_total_files}
@@ -163,7 +159,7 @@ class MetadataHandler:
         return {
             "request": {
                 "position": position,
-                "mission": mission,
+                "mission": mission_params,
             },
             "total_files": total_files,
             "missions": mission_result,
