@@ -105,7 +105,7 @@ class CutoutsUWSHandler:
         size = multimission_request.size
         output_format = multimission_request.output_format
         run_id = multimission_request.run_id
-        mission_params = multimission_request.missions
+        mission_params = {name: v.model_dump(exclude_none=True) for name, v in multimission_request.missions.items()}
         request_params = {
             "position": position,
             "size": size,
