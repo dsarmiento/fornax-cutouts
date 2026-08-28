@@ -23,6 +23,7 @@ class FakeSource(AbstractMissionSource):
     )
 
     def get_filenames(self, **kwargs) -> list[FilenameLookupResponse]:
+        print("get_filenames called with kwargs:", kwargs)
         cutout_position = TargetPosition(ra=210.8023, dec=54.34875)
         file_with_metadata = FilenameWithMetadata(filename="example.fits", metadata={})
         response = FilenameLookupResponse(mission="fake", target=cutout_position, filenames=[file_with_metadata])
@@ -116,3 +117,18 @@ class TestAPIInputFormats:
             "fake_source": {"filter": ["a"]},
         }
         assert response.headers["location"] == f"/api/v0/cutouts/async/{job_id}"
+
+    def test_extra_params_filenames_request_okay(self):
+        form_data = {
+            "position": ["m101"],
+            "size": 4,
+            "filters": "a",
+            "extra_param": "value",
+        }
+        with patch.object(FakeSource, "get_filenames") as mock_get_filenames:
+            self.client.post("api/v0/filenames/fake_source", data=form_data, follow_redirects=False)
+            mock_get_filenames.assert_called()
+            # check that the size, filters, extra_param call args are there
+            assert mock_get_filenames.call_args.kwargs["size"] == "4"
+            assert mock_get_filenames.call_args.kwargs["filters"] == "a"
+            assert mock_get_filenames.call_args.kwargs["extra_param"] == "value"
