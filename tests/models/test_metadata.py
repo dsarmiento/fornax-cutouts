@@ -94,6 +94,20 @@ def test_dot_notation_merges_with_existing_missions_dict():
     }
 
 
+def test_dot_notation_merges_with_existing_missions_dict_multi():
+    request = MultiMissionRequest.model_validate(
+        {
+            "position": ["10, 20"],
+            "missions": {"fake_source": {"survey": ["survey1"]}},
+            "fake_source.filter": ["filter1"],
+            "fake_source.survey": ["survey2"],
+        }
+    )
+    assert _missions_dump(request) == {
+        "fake_source": {"survey": ["survey1", "survey2"], "filter": ["filter1"]},
+    }
+
+
 def test_multiple_sources_combined():
     request = MultiMissionRequest.model_validate(
         {

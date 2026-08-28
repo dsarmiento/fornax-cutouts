@@ -42,7 +42,7 @@ class MultiMissionRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     @model_validator(mode="before")
-    def normalize_missions(cls, input_dict):
+    def normalize_missions(cls, input_dict):  # noqa: C901
         """Normalize the missions dictionary by extracting source-specific parameters from the top-level input.
 
         This allows the request to include source data either at the top level or in dot notation.
@@ -84,10 +84,14 @@ class MultiMissionRequest(BaseModel):
 
                 if param_name not in mission_params[source_name]:
                     mission_params[source_name][param_name] = value
-                elif not isinstance(mission_params[source_name][param_name], list):
-                    mission_params[source_name][param_name] = [mission_params[source_name][param_name], value]
                 else:
-                    mission_params[source_name][param_name].append(value)
+                    # If the parameter already exists, ensure it is a list and append the new value(s)
+                    if not isinstance(mission_params[source_name][param_name], list):
+                        mission_params[source_name][param_name] = [mission_params[source_name][param_name]]
+                    if isinstance(value, list):
+                        mission_params[source_name][param_name].extend(value)
+                    else:
+                        mission_params[source_name][param_name].append(value)
         input_dict_new["missions"] = mission_params
         return input_dict_new
 
