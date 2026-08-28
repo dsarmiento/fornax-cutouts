@@ -93,3 +93,26 @@ class TestAPIInputFormats:
         assert response_body["detail"][0]["type"] == "string_type"
         assert response_body["detail"][0]["loc"] == ["body", "missions", "fake_source", "filter", 0]
         assert response_body["detail"][0]["msg"] == "Input should be a valid string"
+
+    @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
+    def test_dot_notation_request(self, mock_job):
+        mock_instance = mock_job.return_value
+        mock_instance.create_job = mock.AsyncMock()
+        form_data = {
+            "position": ["m101"],
+            "size": 4,
+            "fake_source.filter": "a",
+        }
+        response = self.client.post("api/v0/cutouts/async", data=form_data, follow_redirects=False)
+        assert response.status_code == 303
+        job_id = mock_job.call_args.kwargs["job_id"]
+
+        mock_instance.create_job.assert_awaited_once()
+        # check that the parameters passed to create_job are correct
+        assert mock_instance.create_job.await_args_list[0].kwargs["parameters"] == {
+            "position": ["m101"],
+            "size": 4,
+            "output_format": ["fits"],
+            "fake_source": {"filter": ["a"]},
+        }
+        assert response.headers["location"] == f"/api/v0/cutouts/async/{job_id}"
