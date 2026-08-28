@@ -71,6 +71,7 @@ class TestAPIInputFormats:
 
         # Check that we can send the same request to the /filenames endpoint
         response = self.client.post("/api/v0/filenames", data=form_data)
+
         assert response.status_code == 200
 
     @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
@@ -92,7 +93,7 @@ class TestAPIInputFormats:
 
         assert len(response_body["detail"]) == 1
         assert response_body["detail"][0]["type"] == "string_type"
-        assert response_body["detail"][0]["loc"] == ["body", "missions", "fake_source", "filter", 0]
+        assert response_body["detail"][0]["loc"] == ["missions", "fake_source", "filter", 0]
         assert response_body["detail"][0]["msg"] == "Input should be a valid string"
 
     @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
@@ -102,7 +103,7 @@ class TestAPIInputFormats:
         form_data = {
             "position": ["m101"],
             "size": 4,
-            "fake_source.filter": "a",
+            "fake_source.filter": ["a", "b"],
         }
         response = self.client.post("api/v0/cutouts/async", data=form_data, follow_redirects=False)
         assert response.status_code == 303
@@ -114,7 +115,7 @@ class TestAPIInputFormats:
             "position": ["m101"],
             "size": 4,
             "output_format": ["fits"],
-            "fake_source": {"filter": ["a"]},
+            "fake_source": {"filter": ["a", "b"]},
         }
         assert response.headers["location"] == f"/api/v0/cutouts/async/{job_id}"
 
@@ -132,3 +133,44 @@ class TestAPIInputFormats:
             assert mock_get_filenames.call_args.kwargs["size"] == "4"
             assert mock_get_filenames.call_args.kwargs["filters"] == "a"
             assert mock_get_filenames.call_args.kwargs["extra_param"] == "value"
+
+    @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
+    def test_source_name_key_with_json_string_value(self, mock_job):
+        mock_instance = mock_job.return_value
+        mock_instance.create_job = mock.AsyncMock()
+        form_data = {
+            "position": ["10, 20"],
+            "size": 4,
+            "fake_source": '{"survey": ["c"], "filter": ["a"]}',
+        }
+        response = self.client.post("api/v0/cutouts/async", data=form_data, follow_redirects=False)
+        assert response.status_code == 303
+        job_id = response.headers["location"].split("/")[-1]
+        assert job_id is not None
+
+    @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
+    def test_missions_as_json_string_is_parsed_api(self, mock_job):
+        mock_instance = mock_job.return_value
+        mock_instance.create_job = mock.AsyncMock()
+        form_data = {
+            "position": ["10, 20"],
+            "size": 4,
+            "missions": '{"fake_source": {"survey": ["survey1"]}}',
+        }
+        response = self.client.post("api/v0/cutouts/async", data=form_data, follow_redirects=False)
+        assert response.status_code == 303
+        job_id = response.headers["location"].split("/")[-1]
+        assert job_id is not None
+
+    @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
+    def test_missions_as_invalid_json_string_raises_api(self, mock_job):
+        mock_instance = mock_job.return_value
+        mock_instance.create_job = mock.AsyncMock()
+        form_data = {
+            "position": ["10, 20"],
+            "size": 4,
+            "missions": "not-json",
+        }
+        response = self.client.post("api/v0/cutouts/async", data=form_data, follow_redirects=False)
+        assert response.status_code == 422
+        assert "invalid_json" in response.text
