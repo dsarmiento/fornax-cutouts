@@ -144,7 +144,7 @@ class MetadataHandler:
         description="Resolve positions and return matching file counts for one or more missions.",
         response_model=MultiMissionFilenameCountResponse,
     )
-    async def get_filenames_count(
+   def get_filenames_count(
         self,
         multimission_request: Annotated[MultiMissionRequest, Form()],
     ):
