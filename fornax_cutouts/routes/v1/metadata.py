@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Form, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, status
 from fastapi_utils.cbv import cbv
 
 from fornax_cutouts.models.metadata import (
@@ -10,6 +10,7 @@ from fornax_cutouts.models.metadata import (
     MultiMissionRequest,
 )
 from fornax_cutouts.sources import AbstractMissionSource, cutout_registry
+from fornax_cutouts.utils.form_data import form_parser
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 metadata_router = APIRouter(tags=["Metadata"])
@@ -95,7 +96,7 @@ class MetadataHandler:
     )
     def get_filenames(
         self,
-        multimission_request: Annotated[MultiMissionRequest, Form()],
+        multimission_request: Annotated[MultiMissionRequest, Depends(form_parser(MultiMissionRequest))],
     ):
         mission_result = {}
         total_files = 0
@@ -140,7 +141,7 @@ class MetadataHandler:
     )
     def get_filenames_count(
         self,
-        multimission_request: Annotated[MultiMissionRequest, Form()],
+        multimission_request: Annotated[MultiMissionRequest, Depends(form_parser(MultiMissionRequest))],
     ):
         mission_result = {}
         total_files = 0

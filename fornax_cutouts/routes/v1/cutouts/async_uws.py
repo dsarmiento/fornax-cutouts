@@ -21,6 +21,7 @@ from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
 from fornax_cutouts.models.metadata import MultiMissionCutoutRequest
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
+from fornax_cutouts.utils.form_data import form_parser
 from fornax_cutouts.utils.html_link import html_link
 from fornax_cutouts.utils.logging import get_logger
 
@@ -99,7 +100,7 @@ class CutoutsUWSHandler:
         self,
         request: Request,
         principal: Annotated[Principal, Depends(auth_registry.resolve_principal)],
-        multimission_request: Annotated[MultiMissionCutoutRequest, Form()],
+        multimission_request: Annotated[MultiMissionCutoutRequest, Depends(form_parser(MultiMissionCutoutRequest))],
     ):
         position = multimission_request.position
         size = multimission_request.size
