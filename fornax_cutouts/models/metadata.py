@@ -1,3 +1,4 @@
+import copy
 from typing import Annotated, TypeVar
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
@@ -51,10 +52,10 @@ class MultiMissionRequest(BaseModel):
         """
         source_names = cutout_registry.get_source_names()
 
-        input_dict_new = input_dict.copy()  # Make a copy to avoid mutating the original input
+        input_dict_new = copy.deepcopy(input_dict)  # Make a copy to avoid mutating the original input
 
         # If missions is already present, use it as a base to build the rest of the missions parameters
-        mission_params = input_dict.get("missions", {})
+        mission_params = input_dict_new.get("missions", {})
 
         for key, value in input_dict.items():
             # Case 1: key is a source name
