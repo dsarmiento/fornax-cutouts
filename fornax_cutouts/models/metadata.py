@@ -1,17 +1,38 @@
 import json
-from typing import Annotated
+from typing import Annotated, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
 from fornax_cutouts.sources import cutout_registry
 
 
+def ensure_list(v) -> list:
+    """Ensure the input is a list. If not, wrap it in a list."""
+    return v if isinstance(v, list) else [v]
+
+
+T = TypeVar("T")
+EnsureList = Annotated[list[T], BeforeValidator(ensure_list)]
+
+StringList = EnsureList[str]
+
+
 class FilenameRequest(BaseModel):
-    position: list[str] | None = None
-    survey: list[str] | None = None
-    filter: list[str] | None = None
+    position: StringList | None = None
+    survey: StringList | None = None
+    filter: StringList | None = None
 
     model_config = ConfigDict(extra="allow")
+
+
+def check_json_string(v):
+    """Check if the input is a valid JSON string and parse it."""
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON string: {e.msg}") from e
+    return v
 
 
 class MultiMissionRequest(BaseModel):
@@ -31,36 +52,42 @@ class MultiMissionRequest(BaseModel):
     # modifying it
     model_config = ConfigDict(extra="allow")
 
+    @field_validator("missions", mode="before")
+    @classmethod
+    def parse_missions(cls, value):
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
     @model_validator(mode="before")
     def normalize_missions(cls, input_dict):  # noqa: C901
         """Normalize the missions dictionary by extracting source-specific parameters from the top-level input.
 
         This allows the request to include source data either at the top level or in dot notation.
+
+        Since the input is form-encoded, some values may be JSON strings. As we normalize we check for valid JSON
+        strings and convert them to Python objects when necessary.
         """
         source_names = cutout_registry.get_source_names()
 
         input_dict_new = input_dict.copy()  # Make a copy to avoid mutating the original input
 
         mission_params = {}
+        # If missions is already present, use it as a base to build the rest of the missions parameters
         if "missions" in input_dict:
-            # If missions is a string try to parse it as JSON
-            if isinstance(input_dict["missions"], str):
-                try:
-                    input_dict_new["missions"] = json.loads(input_dict["missions"])
-                except json.JSONDecodeError as e:
-                    raise ValueError(f"missions must be valid JSON: {e.msg}") from e
-                return input_dict_new
+            mission_params = input_dict["missions"]
+            mission_params = check_json_string(mission_params)
 
-            # If missions is a dict use it as a base for the mission params
-            if isinstance(input_dict.get("missions"), dict):
-                mission_params = input_dict["missions"].copy()
+            if not isinstance(mission_params, dict):
+                raise ValueError("missions must be a JSON object")
 
         for key, value in input_dict.items():
-            # Case 1: key is a source name with JSON string value
+            # Case 1: key is a source name
             if key in source_names:
                 if key not in mission_params:
                     mission_params[key] = {}
-                mission_params[key].update(json.loads(value))
+                value = check_json_string(value)
+                mission_params[key].update(value)
                 # Remove the source key from the top level of the final params dict
                 del input_dict_new[key]
             # Case 2: key is in format "source_name.parameter"
