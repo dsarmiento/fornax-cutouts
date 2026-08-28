@@ -13,8 +13,6 @@ from fornax_cutouts.models.metadata import FilenameRequest, MultiMissionCutoutRe
 from fornax_cutouts.sources import AbstractMissionSource, MissionMetadata, cutout_registry
 
 
-# Register a fake source for testing
-@cutout_registry.register_source
 class FakeSource(AbstractMissionSource):
     metadata: MissionMetadata = MissionMetadata(
         name="fake_source",
@@ -35,6 +33,17 @@ class TestAPIInputFormats:
     """Test API input formats for the /filenames and /async endpoints"""
 
     client = TestClient(main_app)
+
+    def setup_class(self):
+        # Register the fake source for testing (once for this test class at start of tests)
+        cutout_registry.register_source(FakeSource)
+
+    def teardown_class(self):
+        # Clear fake source from registry (once for this test class at end of tests)
+        cutout_registry._SOURCES.clear()
+        # Ensure cached_property _VALID_SOURCES is cleared
+        if hasattr(cutout_registry, "_VALID_SOURCES"):
+            del cutout_registry._VALID_SOURCES
 
     @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
     def test_same_request_filenames_async(self, mock_job):
