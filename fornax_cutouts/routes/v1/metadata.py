@@ -30,12 +30,6 @@ def _filename_params(fname_request: FilenameRequest) -> dict:
     return fname_request.model_dump(exclude={"position"}, exclude_none=True)
 
 
-def _normalize_mission_map(mission: dict[str, FilenameRequest] | list[str]) -> dict[str, FilenameRequest]:
-    if isinstance(mission, list):
-        return {mission_name: FilenameRequest() for mission_name in mission}
-    return mission
-
-
 @cbv(metadata_router)
 class MetadataHandler:
     @metadata_router.get(
@@ -144,7 +138,7 @@ class MetadataHandler:
         description="Resolve positions and return matching file counts for one or more missions.",
         response_model=MultiMissionFilenameCountResponse,
     )
-   def get_filenames_count(
+    def get_filenames_count(
         self,
         multimission_request: Annotated[MultiMissionRequest, Form()],
     ):
