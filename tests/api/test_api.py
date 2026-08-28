@@ -72,14 +72,15 @@ class TestAPIInputFormats:
         mock_instance.create_job = mock.AsyncMock()
 
         # Send an invalid request
-        file_name_request = {"survey": "bad survey type", "filter": {"my filter": "val"}}
+        file_name_request = {"filter": {"my filter": "val"}}
         async_form_data = {"fake_source": json.dumps(file_name_request), "position": ["m101"], "size": 4}
         response = self.client.post("api/v0/cutouts/async", data=async_form_data, follow_redirects=False)
         assert response.status_code == 422
 
         response_body = response.json()
         assert "detail" in response_body
-        assert len(response_body["detail"]) == 2
-        assert response_body["detail"][0]["type"] == "list_type"
-        assert response_body["detail"][0]["loc"] == ["body", "missions", "fake_source", "survey"]
-        assert response_body["detail"][0]["msg"] == "Input should be a valid list"
+
+        assert len(response_body["detail"]) == 1
+        assert response_body["detail"][0]["type"] == "string_type"
+        assert response_body["detail"][0]["loc"] == ["body", "missions", "fake_source", "filter", 0]
+        assert response_body["detail"][0]["msg"] == "Input should be a valid string"

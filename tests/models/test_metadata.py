@@ -71,7 +71,7 @@ def test_missions_as_json_string_is_parsed():
 
 
 def test_missions_as_invalid_json_string_raises():
-    with pytest.raises(ValueError, match="missions must be valid JSON"):
+    with pytest.raises(ValueError, match="Invalid JSON string"):
         MultiMissionRequest.model_validate({"position": ["10, 20"], "missions": "not-json"})
 
 
@@ -143,3 +143,41 @@ def test_dot_notation_key_removed_from_top_level():
         }
     )
     assert not hasattr(request, "fake_source.survey")
+
+
+def test_string_field_becomes_list():
+    request = MultiMissionRequest.model_validate(
+        {
+            "position": ["10, 20"],
+            "fake_source": {"survey": "survey1"},
+        }
+    )
+    assert _missions_dump(request) == {"fake_source": {"survey": ["survey1"]}}
+
+
+def test_dot_string_field_becomes_list():
+    request = MultiMissionRequest.model_validate(
+        {
+            "position": ["10, 20"],
+            "fake_source.survey": "survey1",
+        }
+    )
+    assert _missions_dump(request) == {"fake_source": {"survey": ["survey1"]}}
+
+
+def test_normalization_does_not_mutate_input():
+    input_dict = {
+        "position": ["10, 20"],
+        "fake_source.survey": ["survey1"],
+        "fake_source": {"filter": "filter1"},
+    }
+    input_dict_copy = input_dict.copy()
+    request = MultiMissionRequest.model_validate(input_dict)
+    assert input_dict == input_dict_copy
+    # Also check that the request was correctly normalized
+    assert _missions_dump(request) == {
+        "fake_source": {
+            "survey": ["survey1"],
+            "filter": ["filter1"],
+        }
+    }
