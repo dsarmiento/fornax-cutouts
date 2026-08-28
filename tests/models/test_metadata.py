@@ -1,9 +1,5 @@
 """Tests for metadata models and data normalization"""
 
-import json
-
-import pytest
-
 from fornax_cutouts.models.metadata import MultiMissionRequest
 from fornax_cutouts.sources import AbstractMissionSource, MissionMetadata, cutout_registry
 
@@ -61,29 +57,6 @@ def test_missions_dict_passed_through():
         {"position": ["10, 20"], "missions": {"fake_source": {"survey": ["survey1"]}}},
     )
     assert _missions_dump(request) == {"fake_source": {"survey": ["survey1"]}}
-
-
-def test_missions_as_json_string_is_parsed():
-    request = MultiMissionRequest.model_validate(
-        {"position": ["10, 20"], "missions": json.dumps({"fake_source": {"survey": ["survey1"]}})},
-    )
-    assert _missions_dump(request) == {"fake_source": {"survey": ["survey1"]}}
-
-
-def test_missions_as_invalid_json_string_raises():
-    with pytest.raises(ValueError, match="Invalid JSON string"):
-        MultiMissionRequest.model_validate({"position": ["10, 20"], "missions": "not-json"})
-
-
-def test_source_name_key_with_json_string_value():
-    request = MultiMissionRequest.model_validate(
-        {
-            "position": ["10, 20"],
-            "fake_source": json.dumps({"survey": ["survey1"], "filter": ["filter1"]}),
-        }
-    )
-    assert _missions_dump(request) == {"fake_source": {"survey": ["survey1"], "filter": ["filter1"]}}
-    assert not hasattr(request, "fake_source")
 
 
 def test_dot_notation_single_value_becomes_list_field():

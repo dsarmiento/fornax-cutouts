@@ -1,7 +1,6 @@
-import json
 from typing import Annotated, TypeVar
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from fornax_cutouts.sources import cutout_registry
 
@@ -25,16 +24,6 @@ class FilenameRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-def check_json_string(v):
-    """Check if the input is a valid JSON string and parse it."""
-    if isinstance(v, str):
-        try:
-            return json.loads(v)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON string: {e.msg}") from e
-    return v
-
-
 class MultiMissionRequest(BaseModel):
     """
     Request across multiple missions. Accepts source data at the top level and in dot notation, e.g.
@@ -45,22 +34,14 @@ class MultiMissionRequest(BaseModel):
 
     """
 
-    position: list[str]
+    position: StringList | None = None
     missions: dict[str, FilenameRequest]
-
     # Allow extra fields so that we can pass a cutout request to an endpoint that takes a multimission request without
     # modifying it
     model_config = ConfigDict(extra="allow")
 
-    @field_validator("missions", mode="before")
-    @classmethod
-    def parse_missions(cls, value):
-        if isinstance(value, str):
-            return json.loads(value)
-        return value
-
     @model_validator(mode="before")
-    def normalize_missions(cls, input_dict):  # noqa: C901
+    def normalize_missions(cls, input_dict):
         """Normalize the missions dictionary by extracting source-specific parameters from the top-level input.
 
         This allows the request to include source data either at the top level or in dot notation.
@@ -72,21 +53,16 @@ class MultiMissionRequest(BaseModel):
 
         input_dict_new = input_dict.copy()  # Make a copy to avoid mutating the original input
 
-        mission_params = {}
         # If missions is already present, use it as a base to build the rest of the missions parameters
-        if "missions" in input_dict:
-            mission_params = input_dict["missions"]
-            mission_params = check_json_string(mission_params)
-
-            if not isinstance(mission_params, dict):
-                raise ValueError("missions must be a JSON object")
+        mission_params = input_dict.get("missions", {})
 
         for key, value in input_dict.items():
             # Case 1: key is a source name
             if key in source_names:
+                if not isinstance(value, dict):
+                    raise ValueError(f"Expected a dictionary for source '{key}', got {type(value).__name__}")
                 if key not in mission_params:
                     mission_params[key] = {}
-                value = check_json_string(value)
                 mission_params[key].update(value)
                 # Remove the source key from the top level of the final params dict
                 del input_dict_new[key]
@@ -119,8 +95,10 @@ class MultiMissionCutoutRequest(MultiMissionRequest):
     """Cutout request across multiple missions."""
 
     size: int
-    output_format: list[str] = Field(default_factory=lambda: ["fits"])
+    output_format: StringList = Field(default_factory=lambda: ["fits"])
     run_id: Annotated[str, Field(description="RUNID for the request", max_length=64, alias="RUNID")] = ""
+
+    model_config = ConfigDict(extra="allow")
 
 
 class FilenameCountResponse(BaseModel):
