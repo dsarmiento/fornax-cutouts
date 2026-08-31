@@ -15,7 +15,7 @@ and REST API exposure automatically.
 - **Python** 3.10, 3.11, 3.12, or 3.13
 - **Redis** 6.x or newer — used as the Celery broker/backend and for UWS job state.
 
-Configure the broker/backend with the following `CUTOUTS__REDIS__*` settings for local developmetn:
+Configure the broker/backend with the following `CUTOUTS__REDIS__*` settings for local development:
 
 | Variable                  | Default     | Purpose                      |
 | ------------------------- | ----------- | ---------------------------- |

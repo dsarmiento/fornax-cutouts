@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -54,10 +56,16 @@ def _client() -> TestClient:
 
 def setup_function():
     cutout_registry._SOURCES.clear()
+    # Ensure cached_property _VALID_SOURCES is cleared
+    if hasattr(cutout_registry, "_VALID_SOURCES"):
+        del cutout_registry._VALID_SOURCES
 
 
 def teardown_function():
     cutout_registry._SOURCES.clear()
+    # Ensure cached_property _VALID_SOURCES is cleared
+    if hasattr(cutout_registry, "_VALID_SOURCES"):
+        del cutout_registry._VALID_SOURCES
 
 
 def test_default_get_count_uses_get_filenames():
@@ -73,7 +81,7 @@ def test_mission_count_default_uses_get_filenames():
 
     response = _client().post(
         "/api/v0/filenames/fake/count",
-        json={"position": ["10.0 20.0"], "filter": ["g"]},
+        data={"position": ["10.0 20.0"], "filter": ["g"]},
     )
 
     assert response.status_code == 200
@@ -88,7 +96,7 @@ def test_mission_count_uses_get_count():
 
     response = _client().post(
         "/api/v0/filenames/fake/count",
-        json={"position": ["10.0 20.0"], "filter": ["g"]},
+        data={"position": ["10.0 20.0"], "filter": ["g"]},
     )
 
     assert response.status_code == 200
@@ -100,7 +108,7 @@ def test_mission_count_uses_get_count():
 
 def test_count_unknown_mission_is_404():
     client = _client()
-    response = client.post("/api/v0/filenames/missing/count", json={"position": ["10.0 20.0"]})
+    response = client.post("/api/v0/filenames/missing/count", data={"position": ["10.0 20.0"]})
     assert response.status_code == 404
 
 
@@ -111,7 +119,11 @@ def test_multi_mission_count_sums_counts_without_filename_lists():
 
     response = _client().post(
         "/api/v0/filenames/count",
-        json={"position": ["10.0 20.0"], "mission": {"fast": {"filter": ["g"]}, "default": {"filter": ["g"]}}},
+        data={
+            "position": ["10.0 20.0"],
+            "fast": json.dumps({"filter": ["g"]}),
+            "default": json.dumps({"filter": ["g"]}),
+        },
     )
 
     assert response.status_code == 200
@@ -131,15 +143,12 @@ def test_multi_mission_count_passes_each_mission_parameters():
     first_source = FastCountFakeSource(count=4)
     second_source = FastCountFakeSource(count=6)
     cutout_registry._SOURCES.update(first=first_source, second=second_source)
-
     response = _client().post(
         "/api/v0/filenames/count",
-        json={
+        data={
             "position": ["10.0 20.0"],
-            "mission": {
-                "first": {"filter": ["g"], "survey": ["s"]},
-                "second": {"filter": ["r"], "survey": ["wide"]},
-            },
+            "first": json.dumps({"filter": ["g"], "survey": ["s"]}),
+            "second": json.dumps({"filter": ["r"], "survey": ["wide"]}),
         },
     )
 
@@ -151,15 +160,17 @@ def test_multi_mission_count_passes_each_mission_parameters():
     assert second_source.count_requests[0][1] == {"survey": ["wide"]}
 
 
-def test_multi_mission_count_unknown_mission_is_404():
+def test_multi_mission_count_unknown_mission():
     cutout_registry._SOURCES["fake"] = FakeSource()
 
     response = _client().post(
         "/api/v0/filenames/count",
-        json={"position": ["10.0 20.0"], "mission": ["missing"]},
+        data={"position": ["10.0 20.0"], "missing": json.dumps({})},
     )
-
-    assert response.status_code == 404
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["total_files"] == 0
+    assert response_data["missions"] == {}
 
 
 def test_single_mission_filenames_route():
@@ -168,7 +179,7 @@ def test_single_mission_filenames_route():
 
     response = _client().post(
         "/api/v0/filenames/fake",
-        json={"position": ["10.0 20.0"], "filter": ["g"]},
+        data={"position": ["10.0 20.0"], "filter": ["g"]},
     )
 
     assert response.status_code == 200

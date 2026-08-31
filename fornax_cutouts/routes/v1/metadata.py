@@ -1,10 +1,16 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, status
 from fastapi_utils.cbv import cbv
 
-from fornax_cutouts.models.metadata import FilenameCountResponse, FilenameRequest, MultiMissionFilenameCountResponse
+from fornax_cutouts.models.metadata import (
+    FilenameCountResponse,
+    FilenameRequest,
+    MultiMissionFilenameCountResponse,
+    MultiMissionRequest,
+)
 from fornax_cutouts.sources import AbstractMissionSource, cutout_registry
+from fornax_cutouts.utils.form_data import _filename_params, form_parser
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 metadata_router = APIRouter(tags=["Metadata"])
@@ -19,16 +25,6 @@ def _get_mission_or_404(mission: str) -> AbstractMissionSource:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Mission does not exist",
         )
-
-
-def _filename_params(fname_request: FilenameRequest) -> dict:
-    return fname_request.model_dump(exclude={"position"}, exclude_none=True)
-
-
-def _normalize_mission_map(mission: dict[str, FilenameRequest] | list[str]) -> dict[str, FilenameRequest]:
-    if isinstance(mission, list):
-        return {mission_name: FilenameRequest() for mission_name in mission}
-    return mission
 
 
 @cbv(metadata_router)
@@ -67,7 +63,7 @@ class MetadataHandler:
     def get_mission_filenames_count(
         self,
         mission: str,
-        fname_request: Annotated[FilenameRequest, Body()],
+        fname_request: Annotated[FilenameRequest, Form()],
     ):
         """Count matching files for a single mission."""
         if fname_request.position is None:
@@ -96,19 +92,18 @@ class MetadataHandler:
     )
     def get_filenames(
         self,
-        position: Annotated[list[str], Body()],
-        mission: Annotated[dict[str, FilenameRequest] | list[str], Body()],
+        multimission_request: Annotated[MultiMissionRequest, Depends(form_parser(MultiMissionRequest))],
     ):
         mission_result = {}
         total_files = 0
+        position = multimission_request.position
+        missions = multimission_request.missions
 
         resolved_positions = resolve_positions(position)
-
-        mission = _normalize_mission_map(mission)
-
         # TODO: Make this portion call get_filenames in parallel once serving more than one mission
-        for mission_name, fname_request in mission.items():
+        for mission_name, fname_request in missions.items():
             request_dict = _filename_params(fname_request)
+
             request_dict["position"] = resolved_positions
 
             mission_source = cutout_registry.get_mission(mission_name)
@@ -128,7 +123,7 @@ class MetadataHandler:
         return {
             "request": {
                 "position": position,
-                "mission": mission,
+                "mission": missions,
             },
             "total_files": total_files,
             "missions": mission_result,
@@ -142,20 +137,21 @@ class MetadataHandler:
     )
     def get_filenames_count(
         self,
-        position: Annotated[list[str], Body()],
-        mission: Annotated[dict[str, FilenameRequest] | list[str], Body()],
+        multimission_request: Annotated[MultiMissionRequest, Depends(form_parser(MultiMissionRequest))],
     ):
         mission_result = {}
         total_files = 0
 
+        missions = multimission_request.missions
+        position = multimission_request.position
         resolved_positions = resolve_positions(position)
-        mission = _normalize_mission_map(mission)
+        for mission_name, fname_request in missions.items():
+            request_dict = _filename_params(fname_request)
 
-        for mission_name, fname_request in mission.items():
             mission_source = _get_mission_or_404(mission_name)
             mission_total_files = mission_source.get_count(
                 position=resolved_positions,
-                **_filename_params(fname_request),
+                **request_dict,
             )
             total_files += mission_total_files
             mission_result[mission_name] = {"total_files": mission_total_files}
@@ -163,7 +159,7 @@ class MetadataHandler:
         return {
             "request": {
                 "position": position,
-                "mission": mission,
+                "mission": missions,
             },
             "total_files": total_files,
             "missions": mission_result,
@@ -177,7 +173,7 @@ class MetadataHandler:
     def get_mission_filenames(
         self,
         mission: str,
-        fname_request: Annotated[FilenameRequest, Body()],
+        fname_request: Annotated[FilenameRequest, Form()],
     ):
         if fname_request.position is None:
             raise ValueError("'position' cannot be null")

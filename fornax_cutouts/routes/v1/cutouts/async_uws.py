@@ -1,9 +1,7 @@
-import json
 import logging
 import uuid
-from collections import defaultdict
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Path, Query, Request, Response, status
@@ -21,8 +19,9 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, async_redis_client_factory
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
-from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.models.metadata import MultiMissionCutoutRequest
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
+from fornax_cutouts.utils.form_data import _filename_params, form_parser
 from fornax_cutouts.utils.html_link import html_link
 from fornax_cutouts.utils.logging import get_logger
 
@@ -100,44 +99,14 @@ class CutoutsUWSHandler:
     async def post_job(
         self,
         request: Request,
-        position: Annotated[list[str], Form()],
-        size: Annotated[int, Form()],
         principal: Annotated[Principal, Depends(auth_registry.resolve_principal)],
-        output_format: Annotated[list[str], Form()] = ["fits"],
-        run_id: Annotated[
-            str,
-            Form(
-                max_length=64,
-                description="RUNID for the request",
-                alias="RUNID",
-            ),
-        ] = "",
+        multimission_request: Annotated[MultiMissionCutoutRequest, Depends(form_parser(MultiMissionCutoutRequest))],
     ):
-        form = await request.form()
-
-        mission_params: dict[str, dict[str, Any]] = defaultdict(dict)
-        source_names = cutout_registry.get_source_names()
-
-        for key, value in form.multi_items():
-            # Case 1: key is a source name with JSON string value
-            if key in source_names:
-                mission_params[key].update(json.loads(value))
-            # Case 2: key is in format "source_name.parameter"
-            elif "." in key:
-                parts = key.split(".", 1)  # Split only on first dot
-                source_name = parts[0]
-                param_name = parts[1]
-
-                if source_name not in source_names:
-                    continue
-
-                if param_name not in mission_params[source_name]:
-                    mission_params[source_name][param_name] = value
-                elif not isinstance(mission_params[source_name][param_name], list):
-                    mission_params[source_name][param_name] = [mission_params[source_name][param_name], value]
-                else:
-                    mission_params[source_name][param_name].append(value)
-
+        position = multimission_request.position
+        size = multimission_request.size
+        output_format = multimission_request.output_format
+        run_id = multimission_request.run_id
+        mission_params = {name: _filename_params(v) for name, v in multimission_request.missions.items()}
         request_params = {
             "position": position,
             "size": size,
