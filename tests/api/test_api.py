@@ -174,3 +174,14 @@ class TestAPIInputFormats:
         response = self.client.post("api/v0/cutouts/async", data=form_data, follow_redirects=False)
         assert response.status_code == 422
         assert "invalid_json" in response.text
+
+    @patch("fornax_cutouts.routes.v1.cutouts.async_uws.AsyncRedisCutoutJob")
+    def test_empty_str_mission_value_treated_as_empty_dict_top_level(self, mock_job):
+        mock_instance = mock_job.return_value
+        mock_instance.create_job = mock.AsyncMock()
+        form_data = {"position": ["10, 20"], "size": 4, "fake_source": ""}
+        response = self.client.post("api/v0/cutouts/async", data=form_data, follow_redirects=False)
+
+        assert response.status_code == 303
+        job_id = response.headers["location"].split("/")[-1]
+        assert job_id is not None

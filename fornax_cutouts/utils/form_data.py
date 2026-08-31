@@ -5,6 +5,7 @@ from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 
+from fornax_cutouts.models.metadata import FilenameRequest
 from fornax_cutouts.sources import cutout_registry
 
 T = TypeVar("T", bound=BaseModel)
@@ -13,6 +14,10 @@ T = TypeVar("T", bound=BaseModel)
 def check_json_string(v):
     """Check if the input is a valid JSON string and parse it."""
     if isinstance(v, str):
+        # Treat an empty string like an empty dictionary so that users can pass in just an empty string and
+        # assume default params for a mission
+        if v == "":
+            return {}
         try:
             return json.loads(v)
         except json.JSONDecodeError as e:
@@ -56,3 +61,7 @@ def form_parser(model_type: Type[T]):
             raise RequestValidationError(e.errors())
 
     return parse_request
+
+
+def _filename_params(fname_request: FilenameRequest) -> dict:
+    return fname_request.model_dump(exclude={"position"}, exclude_none=True)

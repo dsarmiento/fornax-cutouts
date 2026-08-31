@@ -10,7 +10,7 @@ from fornax_cutouts.models.metadata import (
     MultiMissionRequest,
 )
 from fornax_cutouts.sources import AbstractMissionSource, cutout_registry
-from fornax_cutouts.utils.form_data import form_parser
+from fornax_cutouts.utils.form_data import _filename_params, form_parser
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 metadata_router = APIRouter(tags=["Metadata"])
@@ -25,10 +25,6 @@ def _get_mission_or_404(mission: str) -> AbstractMissionSource:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Mission does not exist",
         )
-
-
-def _filename_params(fname_request: FilenameRequest) -> dict:
-    return fname_request.model_dump(exclude={"position"}, exclude_none=True)
 
 
 @cbv(metadata_router)

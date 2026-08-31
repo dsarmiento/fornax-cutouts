@@ -21,7 +21,7 @@ from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.jobs.tasks import schedule_job
 from fornax_cutouts.models.metadata import MultiMissionCutoutRequest
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
-from fornax_cutouts.utils.form_data import form_parser
+from fornax_cutouts.utils.form_data import _filename_params, form_parser
 from fornax_cutouts.utils.html_link import html_link
 from fornax_cutouts.utils.logging import get_logger
 
@@ -106,7 +106,7 @@ class CutoutsUWSHandler:
         size = multimission_request.size
         output_format = multimission_request.output_format
         run_id = multimission_request.run_id
-        mission_params = {name: v.model_dump(exclude_none=True) for name, v in multimission_request.missions.items()}
+        mission_params = {name: _filename_params(v) for name, v in multimission_request.missions.items()}
         request_params = {
             "position": position,
             "size": size,
