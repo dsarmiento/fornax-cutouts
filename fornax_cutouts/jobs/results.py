@@ -122,6 +122,8 @@ class CutoutResults:
 
     def to_py(self, page: int = 0, limit: int = 100, base_url: str = "") -> dict:
         df = self.__get_results(page, limit)
+        if "fits" in df.columns:
+            df = df.rename(columns={"fits": "science"})
         results = [CutoutResponse.model_validate(row.to_dict()) for _, row in df.iterrows()]
 
         resp = self.__get_pagination_metadata(page, limit, base_url)

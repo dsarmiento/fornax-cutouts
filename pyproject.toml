@@ -33,6 +33,7 @@ dev = [
     "ruff>=0.14.1",
 ]
 test = [
+    "fakeredis[json]>=2.37.1",
     "pytest>=8.0",
     "pytest-asyncio>=1.0",
     "pytest-cov"

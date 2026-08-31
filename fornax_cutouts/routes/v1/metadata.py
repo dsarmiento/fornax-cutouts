@@ -48,7 +48,7 @@ class MetadataHandler:
     ):
         try:
             return cutout_registry.get_mission(mission).metadata
-        except KeyError:
+        except (KeyError, ValueError):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Mission does not exist",
