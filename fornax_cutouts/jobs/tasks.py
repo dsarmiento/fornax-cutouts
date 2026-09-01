@@ -606,17 +606,6 @@ class ASDFCutoutHandler(CutoutHandler):
     Uses the astrocut library to create and manage ASDF cutouts.
     """
 
-    def __init__(
-        self,
-        input_files: list[str],
-        target: TargetPosition,
-        size: tuple[int, int],
-    ):
-        self.input_files = input_files
-        self.coordinate = SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs")
-        self.size = size
-        self.cutout = None
-
     def _make_cutout(self):
         self.cutout = astrocut.ASDFCutout(
             input_files=self.input_files,
