@@ -740,8 +740,8 @@ def generate_cutout(
 
     init_time = time.perf_counter()
 
-    cutout_fname = ""
-    img_fname = ""
+    cutout_fname = None
+    img_fname = None
     science_bytes = 0
     preview_bytes = 0
 
@@ -800,7 +800,6 @@ def generate_cutout(
         output_formats["science"] = cutout_extension.lstrip(".")
         bytes["science"] = science_bytes
         timings_s["science_write"] = round(cutout_write_time - astrocut_init_time, 4)
-        science_fname = cutout_fname
 
     if img_fname:
         output_formats["preview"] = "jpg"
@@ -847,7 +846,7 @@ def generate_cutout(
         position=target,
         size_px=size,
         filter=filter_val,
-        science=science_fname,
+        science=cutout_fname,
         preview=img_fname,
         mission_extras=mission_extras,
     )

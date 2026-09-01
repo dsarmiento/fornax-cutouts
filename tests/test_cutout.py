@@ -50,6 +50,28 @@ def test_generate_cutout_asdf():
         cutout_stem = Path(CUTOUT_FILE_ASDF).stem
         expected_filename = f"{tmpdir}/{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.asdf"
         assert response.science == expected_filename
+        assert response.preview is None
+        assert response.size_px == (10, 10)
+        assert response.filter == "F146"
+
+
+def test_generate_preview_asdf():
+    """Test that we can generate a cutout preview from an ASDF file"""
+    cutout_ra = 8.46340835
+    cutout_dec = -43.8514
+    with TemporaryDirectory() as tmpdir:
+        response = generate_cutout(
+            source_file=CUTOUT_FILE_ASDF,
+            target=TargetPosition(ra=cutout_ra, dec=cutout_dec),
+            size=(10, 10),
+            output_dir=tmpdir,
+            generate_preview=True,
+            generate_science=False,
+        )
+        cutout_stem = Path(CUTOUT_FILE_ASDF).stem
+        expected_filename = f"{tmpdir}/{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut_0.jpg"
+        assert response.science is None
+        assert response.preview == expected_filename
         assert response.size_px == (10, 10)
         assert response.filter == "F146"
 
