@@ -400,7 +400,7 @@ def write_results(self: Task, job_id: str, batch_num: int):
         expected_total = job_status["total_jobs"]
         total_completed = completed_tasks + failed_tasks + skipped_tasks
         job_complete = total_completed == expected_total and pending_tasks == 0
-
+        next_batch = -1
         if job_complete:
             r.complete_job()
 
@@ -480,7 +480,7 @@ class CutoutHandler:
         single_outfile: bool = True,
     ):
         self.input_files = input_files
-        self.coordinate = SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs")
+        self.coordinate = SkyCoord(ra=target.ra, dec=target.dec, unit="deg", frame="icrs")
         self.size = size
         self.cutout = None
         self.single_outfile = single_outfile
@@ -490,7 +490,7 @@ class CutoutHandler:
         self,
         output_dir: str,
         cutout_prefix: str = "cutout",
-    ) -> None:
+    ) -> str:
         """
         Create a cutout from the given source file.
 
@@ -499,7 +499,7 @@ class CutoutHandler:
             cutout_prefix (str): Prefix for the cutout filename. (Only used if we are creating a single file.)
 
         Returns:
-            None
+            str: Filename of the generated cutout.
         """
         pass
 
@@ -685,7 +685,7 @@ def setup_filesystem(output_dir: str) -> AbstractFileSystem:
         logger.debug(f"Output directory already exists: {output_dir}")
     except Exception as e:
         logger.warning(f"Error creating output directory: {e}")
-        raise e
+        raise
 
     return fs
 
@@ -789,7 +789,7 @@ def generate_cutout(
 
     end_time = time.perf_counter()
 
-    bytes = {}
+    cutout_bytes = {}
     output_formats = {}
     timings_s = {
         "init": round(init_time - start_time, 4),
@@ -800,12 +800,12 @@ def generate_cutout(
 
     if cutout_fname:
         output_formats["science"] = science_format
-        bytes["science"] = science_bytes
+        cutout_bytes["science"] = science_bytes
         timings_s["science_write"] = round(cutout_write_time - astrocut_init_time, 4)
 
     if img_fname:
         output_formats["preview"] = "jpg"
-        bytes["preview"] = preview_bytes
+        cutout_bytes["preview"] = preview_bytes
         timings_s["preview_write"] = round(jpg_write_time - cutout_write_time, 4)
 
     logger.info(
@@ -824,7 +824,7 @@ def generate_cutout(
                 "y": size[1],
                 "area": size[0] * size[1],
             },
-            "bytes": bytes,
+            "bytes": cutout_bytes,
             "total_s": timings_s["total"],
             "output_formats": output_formats,
         },
