@@ -104,13 +104,15 @@ class CutoutsUWSHandler:
     ):
         position = multimission_request.position
         size = multimission_request.size
-        output_format = multimission_request.output_format
+        generate_science = multimission_request.generate_science
+        generate_preview = multimission_request.generate_preview
         run_id = multimission_request.run_id
         mission_params = {name: _filename_params(v) for name, v in multimission_request.missions.items()}
         request_params = {
             "position": position,
             "size": size,
-            "output_format": output_format,
+            "generate_science": generate_science,
+            "generate_preview": generate_preview,
             **mission_params,
         }
 

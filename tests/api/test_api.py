@@ -114,7 +114,8 @@ class TestAPIInputFormats:
         assert mock_instance.create_job.await_args_list[0].kwargs["parameters"] == {
             "position": ["m101"],
             "size": 4,
-            "output_format": ["fits"],
+            "generate_science": True,
+            "generate_preview": False,
             "fake_source": {"filter": ["a", "b"]},
         }
         assert response.headers["location"] == f"/api/v0/cutouts/async/{job_id}"

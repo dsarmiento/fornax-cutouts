@@ -100,7 +100,8 @@ class MultiMissionCutoutRequest(MultiMissionRequest):
     """Cutout request across multiple missions."""
 
     size: int
-    output_format: StringList = Field(default_factory=lambda: ["fits"])
+    generate_science: bool = Field(True)
+    generate_preview: bool = Field(False)
     run_id: Annotated[str, Field(description="RUNID for the request", max_length=64, alias="RUNID")] = ""
 
     model_config = ConfigDict(extra="allow")
