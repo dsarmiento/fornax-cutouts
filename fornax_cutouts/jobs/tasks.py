@@ -746,7 +746,7 @@ def generate_cutout(
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
         # Support variations of fits extensions
-        if cutout_file.endswith((".fit", ".fits", ".fts", ".fits.gz", ".fits.fz")):
+        if cutout_file.endswith(FITS_SUFFIXES):
             science_format = "fits"
             cutout_handler = FITSCutoutHandler(
                 input_files=[source_file],
@@ -754,7 +754,7 @@ def generate_cutout(
                 size=size,
             )
         # Support .asdf (extension variations supported TBD)
-        elif cutout_file.endswith(".asdf"):
+        elif cutout_file.endswith(ASDF_SUFFIXES):
             science_format = "asdf"
             cutout_handler = ASDFCutoutHandler(
                 input_files=[source_file],
