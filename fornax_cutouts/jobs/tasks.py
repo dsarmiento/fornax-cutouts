@@ -711,7 +711,7 @@ def generate_cutout(
         output_dir (str): Destination directory.
         generate_science (bool, optional): Set to true to generate science cutout file. Supports FITS and ASDF formats.
             Defaults to True.
-        generate_preview (str, optional): Set to true to generate jpeg preview file.
+        generate_preview (bool, optional): Set to true to generate jpeg preview file.
             Defaults to False.
         mission (str, optional): The mission name (e.g., "ps1").
             Defaults to "sync_cutout".
@@ -1001,7 +1001,7 @@ def execute_cutout(  # noqa: C901
         size (int | tuple[int, int]): Size of the cutout
         generate_science (bool, optional): Set to true to generate science cutout file. Supports FITS and ASDF formats.
             Defaults to True.
-        generate_preview (str, optional): Set to true to generate jpeg preview file.
+        generate_preview (bool, optional): Set to true to generate jpeg preview file.
             Defaults to False.
         output_dir (str, optional): Destination directory.
             Defaults to "".
