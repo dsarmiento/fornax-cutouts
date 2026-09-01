@@ -66,9 +66,6 @@ class CutoutsSyncHandler:
         """
         Generate a FITS and JPEG cutout for a specified source
         """
-        output_formats = ["fits"]
-        if include_preview:
-            output_formats.append("jpeg")
 
         if not job_id:
             job_id = uuid.uuid4().hex[:8]
@@ -81,7 +78,8 @@ class CutoutsSyncHandler:
                 "source_file": filename,
                 "target": TargetPosition(ra, dec),
                 "size": size,
-                "output_format": output_formats,
+                "generate_science": True,
+                "generate_preview": include_preview,
                 "output_dir": output_dir,
                 "mission": "sync",
             },
