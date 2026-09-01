@@ -1,4 +1,4 @@
-"""Temp file for testing cutouts"""
+"""Tests for cutouts"""
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
