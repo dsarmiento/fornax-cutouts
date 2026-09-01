@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Sequence
 from urllib.parse import urlparse
 
 import astrocut
@@ -33,6 +34,9 @@ BATCH_CUTOUTS_TASK_ID_TEMPLATE = "batch_cutouts-{job_id}-{batch_num}"
 WRITE_RESULTS_TASK_ID_TEMPLATE = "write_results-{job_id}-{batch_num}"
 BATCH_WATCHDOG_TASK_ID_TEMPLATE = "batch_watchdog-{job_id}-{batch_num}"
 EXECUTE_CUTOUT_TASK_ID_TEMPLATE = "execute_cutout-{job_id}-{batch_num}-{increment_id}"
+
+FITS_SUFFIXES = (".fit", ".fits", ".fts", ".fits.gz", ".fits.fz")
+ASDF_SUFFIXES = (".asdf",)
 
 
 @celery_app.task(
@@ -473,30 +477,26 @@ class CutoutHandler:
         input_files: list[str],
         target: TargetPosition,
         size: tuple[int, int],
+        single_outfile: bool = True,
     ):
         self.input_files = input_files
         self.coordinate = SkyCoord(ra=target[0], dec=target[1], unit="deg", frame="icrs")
         self.size = size
         self.cutout = None
+        self.single_outfile = single_outfile
 
     @abstractmethod
     def make_cutout(
         self,
-        source_file: str,
-        target: TargetPosition,
-        size: tuple[int, int],
         output_dir: str,
-        cutout_prefix: str | None = None,
+        cutout_prefix: str = "cutout",
     ) -> None:
         """
         Create a cutout from the given source file.
 
         Args:
-            source_file (str): Path to the source image file.
-            target (TargetPosition): Target position for the cutout.
-            size (tuple[int, int]): Size of the cutout.
             output_dir (str): Directory to save the cutout.
-            cutout_prefix (str | None): Prefix for the cutout filename.
+            cutout_prefix (str): Prefix for the cutout filename. (Only used if we are creating a single file.)
 
         Returns:
             None
@@ -548,7 +548,7 @@ class FITSCutoutHandler(CutoutHandler):
             input_files=self.input_files,
             coordinates=self.coordinate,
             cutout_size=self.size,
-            single_outfile=False,
+            single_outfile=self.single_outfile,
         )
 
     def make_cutout(
@@ -690,6 +690,15 @@ def setup_filesystem(output_dir: str) -> AbstractFileSystem:
     return fs
 
 
+def get_cutout_stem(cutout_file: str, extensions: Sequence[str]) -> str:
+    """Get the name of the cutout file without the file extension"""
+    for extension in extensions:
+        if cutout_file.endswith(extension):
+            cutout_file = cutout_file.removesuffix(extension)
+            return cutout_file
+    return cutout_file
+
+
 def generate_cutout(
     source_file: str,
     target: TargetPosition,
@@ -721,14 +730,14 @@ def generate_cutout(
     start_time = time.perf_counter()
 
     cutout_path = urlparse(source_file).path
-    cutout_prefix = Path(cutout_path).stem
-    # Determine the file extension for the cutout so we know which cutout handler to use (FITS or ASDF)
-    cutout_extension = Path(cutout_path).suffix.lower()
+    cutout_file = Path(cutout_path).name
+    cutout_prefix = get_cutout_stem(cutout_file, ASDF_SUFFIXES + FITS_SUFFIXES)
 
     fs = setup_filesystem(output_dir)
 
     init_time = time.perf_counter()
 
+    science_format = None
     cutout_fname = None
     img_fname = None
     science_bytes = 0
@@ -736,20 +745,24 @@ def generate_cutout(
 
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
-        if cutout_extension.startswith(".fit"):
+        # Support variations of fits extensions
+        if cutout_file.endswith((".fit", ".fits", ".fts", ".fits.gz", ".fits.fz")):
+            science_format = "fits"
             cutout_handler = FITSCutoutHandler(
                 input_files=[source_file],
                 target=target,
                 size=size,
             )
-        elif cutout_extension.startswith(".asdf"):
+        # Support .asdf (extension variations supported TBD)
+        elif cutout_file.endswith(".asdf"):
+            science_format = "asdf"
             cutout_handler = ASDFCutoutHandler(
                 input_files=[source_file],
                 target=target,
                 size=size,
             )
         else:
-            raise ValueError(f"Unsupported format: {cutout_extension}")
+            raise ValueError(f"Unsupported format for file: {cutout_file}")
 
         astrocut_init_time = time.perf_counter()
         if generate_science:
@@ -786,7 +799,7 @@ def generate_cutout(
     }
 
     if cutout_fname:
-        output_formats["science"] = cutout_extension.lstrip(".")
+        output_formats["science"] = science_format
         bytes["science"] = science_bytes
         timings_s["science_write"] = round(cutout_write_time - astrocut_init_time, 4)
 
@@ -853,27 +866,30 @@ def generate_color_preview(
     Generate a color preview of a cutout
     """
     cutout_path = urlparse(red).path
-    cutout_prefix = Path(cutout_path).stem + "_color"
-    cutout_extension = Path(cutout_path).suffix.lower()
+    cutout_file = Path(cutout_path).name
+    cutout_stem = get_cutout_stem(cutout_file, ASDF_SUFFIXES + FITS_SUFFIXES)
+    cutout_prefix = cutout_stem + "_color"
 
     start_time = time.perf_counter()
 
-    # Support .fit/.fits/.fits.gz/.fits.fz
-    if cutout_extension.startswith(".fit"):
+    # Support variations of fits extensions
+    if cutout_path.endswith(FITS_SUFFIXES):
         cutout_handler = FITSCutoutHandler(
             input_files=[red, green, blue],
             target=target,
             size=size,
+            # For color preview we want to generate separate files
+            single_outfile=False,
         )
-    # Support .asdf and possible compressed formats TBD
-    elif cutout_extension.startswith(".asdf"):
+    # Support .asdf (extension variations supported TBD)
+    elif cutout_path.endswith(ASDF_SUFFIXES):
         cutout_handler = ASDFCutoutHandler(
             input_files=[red, green, blue],
             target=target,
             size=size,
         )
     else:
-        raise ValueError(f"Unsupported format: {cutout_extension}")
+        raise ValueError(f"Unsupported format for file: {cutout_file}")
 
     astrocut_time = time.perf_counter()
 

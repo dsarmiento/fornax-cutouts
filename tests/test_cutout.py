@@ -5,6 +5,7 @@ from unittest import mock
 
 from fornax_cutouts.jobs.tasks import generate_color_preview, generate_cutout
 from fornax_cutouts.models.base import TargetPosition
+from fornax_cutouts.models.cutouts import ColorFilter
 
 CUTOUT_FILE_ASDF = "tests/data/r00342_p_v01002001004008_008m46x76y60_f146_coadd_shrink.asdf"
 CUTOUT_FILE_FITS = (
@@ -51,6 +52,8 @@ def test_generate_cutout_asdf(tmp_path):
     assert response.preview is None
     assert response.size_px == (10, 10)
     assert response.filter == "F146"
+    assert response.position == TargetPosition(ra=cutout_ra, dec=cutout_dec)
+    assert response.mission_extras == {}
 
 
 def test_generate_preview_asdf(tmp_path):
@@ -71,6 +74,28 @@ def test_generate_preview_asdf(tmp_path):
     assert response.preview == expected_filename
     assert response.size_px == (10, 10)
     assert response.filter == "F146"
+    assert response.position == TargetPosition(ra=cutout_ra, dec=cutout_dec)
+    assert response.mission_extras == {}
+
+
+def test_cutout_fitz_gz(tmp_path):
+    """Test that we can generate a cutout from a FITS file with .fits.gz extension"""
+    cutout_ra = 188.27856215089
+    cutout_dec = 82.56394517878
+    response = generate_cutout(
+        source_file="tests/data/rings.v3.skycell.2627.066.stk.g.unconv_shrink.fits.gz",
+        target=TargetPosition(ra=cutout_ra, dec=cutout_dec),
+        size=(100, 100),
+        output_dir=str(tmp_path),
+    )
+    cutout_stem = "rings.v3.skycell.2627.066.stk.g.unconv_shrink"
+    expected_filename = f"{tmp_path}/{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_100-x-100_astrocut.fits"
+    assert response.science == expected_filename
+    assert response.size_px == (100, 100)
+    assert response.position == TargetPosition(ra=cutout_ra, dec=cutout_dec)
+    assert response.filter == "g.00000"
+    assert response.mission_extras == {}
+    assert response.preview is None
 
 
 def test_generate_color_preview(tmp_path):
@@ -99,3 +124,10 @@ def test_generate_color_preview(tmp_path):
     assert response.preview == expected_filename
     assert response.science is None
     assert response.size_px == (10, 10)
+    assert response.position == target
+    assert response.filter == ColorFilter(
+        red="i.00000",
+        green="g.00000",
+        blue="r.00000",
+    )
+    assert response.mission_extras is None
