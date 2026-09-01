@@ -736,13 +736,13 @@ def generate_cutout(
 
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
-        if ".fits" == cutout_extension:
+        if cutout_extension.startswith(".fit"):
             cutout_handler = FITSCutoutHandler(
                 input_files=[source_file],
                 target=target,
                 size=size,
             )
-        elif ".asdf" == cutout_extension:
+        elif cutout_extension.startswith(".asdf"):
             cutout_handler = ASDFCutoutHandler(
                 input_files=[source_file],
                 target=target,
