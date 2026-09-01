@@ -47,8 +47,8 @@ def test_generate_cutout_asdf(tmp_path):
         output_dir=str(tmp_path),
     )
     cutout_stem = Path(CUTOUT_FILE_ASDF).stem
-    expected_filename = f"{tmp_path}/{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.asdf"
-    assert response.science == expected_filename
+    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.asdf"
+    assert response.science == str(expected_path)
     assert response.preview is None
     assert response.size_px == (10, 10)
     assert response.filter == "F146"
@@ -69,16 +69,16 @@ def test_generate_preview_asdf(tmp_path):
         generate_science=False,
     )
     cutout_stem = Path(CUTOUT_FILE_ASDF).stem
-    expected_filename = f"{tmp_path}/{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut_0.jpg"
+    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut_0.jpg"
     assert response.science is None
-    assert response.preview == expected_filename
+    assert response.preview == str(expected_path)
     assert response.size_px == (10, 10)
     assert response.filter == "F146"
     assert response.position == TargetPosition(ra=cutout_ra, dec=cutout_dec)
     assert response.mission_extras == {}
 
 
-def test_cutout_fitz_gz(tmp_path):
+def test_cutout_fits_gz(tmp_path):
     """Test that we can generate a cutout from a FITS file with .fits.gz extension"""
     cutout_ra = 188.27856215089
     cutout_dec = 82.56394517878
@@ -89,8 +89,8 @@ def test_cutout_fitz_gz(tmp_path):
         output_dir=str(tmp_path),
     )
     cutout_stem = "rings.v3.skycell.2627.066.stk.g.unconv_shrink"
-    expected_filename = f"{tmp_path}/{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_100-x-100_astrocut.fits"
-    assert response.science == expected_filename
+    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_100-x-100_astrocut.fits"
+    assert response.science == str(expected_path)
     assert response.size_px == (100, 100)
     assert response.position == TargetPosition(ra=cutout_ra, dec=cutout_dec)
     assert response.filter == "g.00000"
@@ -103,7 +103,7 @@ def test_generate_color_preview(tmp_path):
     cutout_ra = 188.27856215089
     cutout_dec = 82.56394517878
     cutout_size = (10, 10)
-    target = TargetPosition(ra=float(cutout_ra), dec=float(cutout_dec))
+    target = TargetPosition(ra=cutout_ra, dec=cutout_dec)
     cutout_files = [
         "tests/data/rings.v3.skycell.2627.066.stk.i.unconv_shrink.fits",
         "tests/data/rings.v3.skycell.2627.066.stk.g.unconv_shrink.fits.gz",
@@ -119,9 +119,9 @@ def test_generate_color_preview(tmp_path):
     )
 
     cutout_stem = Path(cutout_files[0]).stem
-    expected_filename = f"{tmp_path}/{cutout_stem}_color_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.jpg"
+    expected_path = tmp_path / f"{cutout_stem}_color_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.jpg"
 
-    assert response.preview == expected_filename
+    assert response.preview == str(expected_path)
     assert response.science is None
     assert response.size_px == (10, 10)
     assert response.position == target
