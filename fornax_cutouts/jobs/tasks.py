@@ -760,7 +760,7 @@ def generate_cutout(
                 size=size,
             )
         else:
-            raise ValueError(f"Unsupported output format: {cutout_extension}")
+            raise ValueError(f"Unsupported format: {cutout_extension}")
 
         astrocut_init_time = time.perf_counter()
         if generate_science:
@@ -869,20 +869,22 @@ def generate_color_preview(
 
     start_time = time.perf_counter()
 
-    if ".fits" == cutout_extension:
+    # Support .fit/.fits/.fits.gz/.fits.fz
+    if cutout_extension.startswith(".fit"):
         cutout_handler = FITSCutoutHandler(
             input_files=[red, green, blue],
             target=target,
             size=size,
         )
-    elif ".asdf" == cutout_extension:
+    # Support .asdf and possible compressed formats TBD
+    elif cutout_extension.startswith(".asdf"):
         cutout_handler = ASDFCutoutHandler(
             input_files=[red, green, blue],
             target=target,
             size=size,
         )
     else:
-        raise ValueError(f"Unsupported output format: {cutout_extension}")
+        raise ValueError(f"Unsupported format: {cutout_extension}")
 
     astrocut_time = time.perf_counter()
 

@@ -84,7 +84,7 @@ def test_generate_color_preview():
     target = TargetPosition(ra=float(cutout_ra), dec=float(cutout_dec))
     cutout_files = [
         "tests/data/rings.v3.skycell.2627.066.stk.i.unconv_shrink.fits",
-        "tests/data/rings.v3.skycell.2627.066.stk.g.unconv_shrink.fits",
+        "tests/data/rings.v3.skycell.2627.066.stk.g.unconv_shrink.fits.gz",
         "tests/data/rings.v3.skycell.2627.066.stk.r.unconv_shrink.fits",
     ]
 
