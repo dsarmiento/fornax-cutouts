@@ -579,7 +579,9 @@ class FITSCutoutHandler(CutoutHandler):
             colorize=colorize,
             stretch=STRETCH,
             minmax_percent=MINMAX_PERCENT,
-        )[0]
+        )
+        if isinstance(img_fname, list):
+            img_fname = img_fname[0]
         return img_fname
 
     def get_filter(self, i) -> str | None:
@@ -588,9 +590,10 @@ class FITSCutoutHandler(CutoutHandler):
 
         fits_cutout = self.cutout.fits_cutouts[i]
         filter = None
+
         try:
             cutout_header = fits_cutout["CUTOUT"].header
-            filter = cutout_header["*FILTER*"][i]
+            filter = cutout_header["*FILTER*"][0]
         except KeyError:
             pass
 
@@ -894,23 +897,7 @@ def generate_color_preview(
 
         preview_bytes = Path(img_fname).stat().st_size
 
-        fs: AbstractFileSystem
-        output_is_s3 = output_dir.startswith("s3://")
-        if output_is_s3:
-            fs = filesystem("s3")
-        else:
-            fs = filesystem("local")
-
-        # Only create directories for local filesystem; S3 doesn't need them
-        # and the isdir/mkdir calls are expensive LIST operations
-        try:
-            if not output_is_s3 and not fs.isdir(output_dir):
-                fs.mkdir(output_dir)
-        except FileExistsError:
-            logger.debug(f"Output directory already exists: {output_dir}")
-        except Exception as e:
-            logger.warning(f"Error creating output directory: {e}")
-            raise e
+        fs = setup_filesystem(output_dir)
 
         fs.put(lpath=img_fname, rpath=output_dir)
 
