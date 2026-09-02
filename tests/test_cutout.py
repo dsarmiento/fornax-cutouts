@@ -1,11 +1,11 @@
-"""Temp file for testing cutouts"""
+"""Tests for cutouts"""
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest import mock
 
-from fornax_cutouts.jobs.tasks import generate_cutout
+from fornax_cutouts.jobs.tasks import generate_color_preview, generate_cutout
 from fornax_cutouts.models.base import TargetPosition
+from fornax_cutouts.models.cutouts import ColorFilter
 
 CUTOUT_FILE_ASDF = "tests/data/r00342_p_v01002001004008_008m46x76y60_f146_coadd_shrink.asdf"
 CUTOUT_FILE_FITS = (
@@ -36,19 +36,98 @@ def test_generate_cutout_fits():
     assert response.filter == "abc"
 
 
-def test_generate_cutout_asdf():
+def test_generate_cutout_asdf(tmp_path):
     """Test that we can generate a cutout from an ASDF file"""
     cutout_ra = 8.46340835
     cutout_dec = -43.8514
-    with TemporaryDirectory() as tmpdir:
-        response = generate_cutout(
-            source_file=CUTOUT_FILE_ASDF,
-            target=TargetPosition(ra=cutout_ra, dec=cutout_dec),
-            size=(10, 10),
-            output_dir=tmpdir,
-        )
-        cutout_stem = Path(CUTOUT_FILE_ASDF).stem
-        expected_filename = f"{tmpdir}/{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.asdf"
-        assert response.science == expected_filename
-        assert response.size_px == (10, 10)
-        assert response.filter == "F146"
+    response = generate_cutout(
+        source_file=CUTOUT_FILE_ASDF,
+        target=TargetPosition(ra=cutout_ra, dec=cutout_dec),
+        size=(10, 10),
+        output_dir=str(tmp_path),
+    )
+    cutout_stem = Path(CUTOUT_FILE_ASDF).stem
+    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.asdf"
+    assert response.science == str(expected_path)
+    assert response.preview is None
+    assert response.size_px == (10, 10)
+    assert response.filter == "F146"
+    assert response.position == TargetPosition(ra=cutout_ra, dec=cutout_dec)
+    assert response.mission_extras == {}
+
+
+def test_generate_preview_asdf(tmp_path):
+    """Test that we can generate a cutout preview from an ASDF file"""
+    cutout_ra = 8.46340835
+    cutout_dec = -43.8514
+    response = generate_cutout(
+        source_file=CUTOUT_FILE_ASDF,
+        target=TargetPosition(ra=cutout_ra, dec=cutout_dec),
+        size=(10, 10),
+        output_dir=str(tmp_path),
+        generate_preview=True,
+        generate_science=False,
+    )
+    cutout_stem = Path(CUTOUT_FILE_ASDF).stem
+    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut_0.jpg"
+    assert response.science is None
+    assert response.preview == str(expected_path)
+    assert response.size_px == (10, 10)
+    assert response.filter == "F146"
+    assert response.position == TargetPosition(ra=cutout_ra, dec=cutout_dec)
+    assert response.mission_extras == {}
+
+
+def test_cutout_fits_gz(tmp_path):
+    """Test that we can generate a cutout from a FITS file with .fits.gz extension"""
+    cutout_ra = 188.27856215089
+    cutout_dec = 82.56394517878
+    response = generate_cutout(
+        source_file="tests/data/rings.v3.skycell.2627.066.stk.g.unconv_shrink.fits.gz",
+        target=TargetPosition(ra=cutout_ra, dec=cutout_dec),
+        size=(100, 100),
+        output_dir=str(tmp_path),
+    )
+    cutout_stem = "rings.v3.skycell.2627.066.stk.g.unconv_shrink"
+    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_100-x-100_astrocut.fits"
+    assert response.science == str(expected_path)
+    assert response.size_px == (100, 100)
+    assert response.position == TargetPosition(ra=cutout_ra, dec=cutout_dec)
+    assert response.filter == "g.00000"
+    assert response.mission_extras == {}
+    assert response.preview is None
+
+
+def test_generate_color_preview(tmp_path):
+    """Test that we can generate a color preview from a FITS file"""
+    cutout_ra = 188.27856215089
+    cutout_dec = 82.56394517878
+    cutout_size = (10, 10)
+    target = TargetPosition(ra=cutout_ra, dec=cutout_dec)
+    cutout_files = [
+        "tests/data/rings.v3.skycell.2627.066.stk.i.unconv_shrink.fits",
+        "tests/data/rings.v3.skycell.2627.066.stk.g.unconv_shrink.fits.gz",
+        "tests/data/rings.v3.skycell.2627.066.stk.r.unconv_shrink.fits",
+    ]
+    response = generate_color_preview(
+        cutout_files[0],
+        cutout_files[1],
+        cutout_files[2],
+        target,
+        cutout_size,
+        output_dir=str(tmp_path),
+    )
+
+    cutout_stem = Path(cutout_files[0]).stem
+    expected_path = tmp_path / f"{cutout_stem}_color_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.jpg"
+
+    assert response.preview == str(expected_path)
+    assert response.science is None
+    assert response.size_px == (10, 10)
+    assert response.position == target
+    assert response.filter == ColorFilter(
+        red="i.00000",
+        green="g.00000",
+        blue="r.00000",
+    )
+    assert response.mission_extras is None
