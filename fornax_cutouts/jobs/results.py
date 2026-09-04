@@ -71,7 +71,7 @@ class CutoutResults:
                 "size_px": r.size_px,
                 "filter": r.filter,
                 "mission_extras": json.dumps(r.mission_extras),
-                "fits": r.science,
+                "science": r.science,
                 "preview": r.preview,
             }
             for r in results
@@ -85,7 +85,7 @@ class CutoutResults:
                     pa.field("size_px", pa.list_(pa.int64())),
                     pa.field("filter", pa.string()),
                     pa.field("mission_extras", pa.string()),
-                    pa.field("fits", pa.string()),
+                    pa.field("science", pa.string()),
                     pa.field("preview", pa.string()),
                 ]
             ),
@@ -122,6 +122,8 @@ class CutoutResults:
 
     def to_py(self, page: int = 0, limit: int = 100, base_url: str = "") -> dict:
         df = self.__get_results(page, limit)
+        if "fits" in df.columns:
+            df = df.rename(columns={"fits": "science"})
         results = [CutoutResponse.model_validate(row.to_dict()) for _, row in df.iterrows()]
 
         resp = self.__get_pagination_metadata(page, limit, base_url)
