@@ -46,13 +46,7 @@ class MetadataHandler:
         self,
         mission: str,
     ):
-        try:
-            return cutout_registry.get_mission(mission).metadata
-        except (KeyError, ValueError):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Mission does not exist",
-            )
+        return _get_mission_or_404(mission).metadata
 
     @metadata_router.post(
         "/filenames/{mission}/count",
