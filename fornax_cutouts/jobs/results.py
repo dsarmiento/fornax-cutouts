@@ -71,7 +71,7 @@ class CutoutResults:
                 "size_px": r.size_px,
                 "filter": r.filter,
                 "mission_extras": json.dumps(r.mission_extras),
-                "fits": r.science,
+                "science": r.science,
                 "preview": r.preview,
             }
             for r in results
@@ -85,7 +85,7 @@ class CutoutResults:
                     pa.field("size_px", pa.list_(pa.int64())),
                     pa.field("filter", pa.string()),
                     pa.field("mission_extras", pa.string()),
-                    pa.field("fits", pa.string()),
+                    pa.field("science", pa.string()),
                     pa.field("preview", pa.string()),
                 ]
             ),
