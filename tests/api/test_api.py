@@ -34,7 +34,7 @@ _SANTA_POSITIONS = ["10.0, 20.0", _OBJECT_NAME, "30.0, 40.0"]
 
 _ASYNC_JOB_FORM = {
     "RUNID": "test-run-id",
-    "output_format": "jpeg",
+    "generate_preview": "true",
     "position": _POSITIONS,
     "size": "256",
     "fake_source.stack_file": "data",
@@ -274,7 +274,8 @@ class TestSync:
         assert kwargs["source_file"] == _SYNC_FILENAME
         assert kwargs["target"] == TargetPosition(_SYNC_RA, _SYNC_DEC)
         assert kwargs["size"] == _SYNC_SIZE
-        assert kwargs["output_format"] == ["fits", "jpeg"]
+        assert kwargs["generate_science"] is True
+        assert kwargs["generate_preview"] is True
         assert kwargs["mission"] == "sync"
         assert kwargs["output_dir"].endswith(f"cutouts/sync/{kwargs['job_id']}")
         assert call.kwargs["priority"] == 0
@@ -374,7 +375,8 @@ class TestRequestFormats:
         job_id = _created_job_id(response)
         assert response.headers["location"] == f"/api/v0/cutouts/async/{job_id}"
         job = _job_uws(api.redis, job_id)
-        assert job["parameters"]["output_format"] == ["fits"]
+        assert job["parameters"]["generate_science"] is True
+        assert job["parameters"]["generate_preview"] is False
         assert job["parameters"]["fake_source"] == {"filter": ["a", "b"]}
 
     def test_same_form_works_for_async_and_filenames(self, api):
@@ -496,7 +498,8 @@ class TestAsyncUWS:
         job = _job_uws(api.redis, job_id)
         assert job["run_id"] == "test-run-id"
         assert job["parameters"]["size"] == 256
-        assert job["parameters"]["output_format"] == ["jpeg"]
+        assert job["parameters"]["generate_science"] is True
+        assert job["parameters"]["generate_preview"] is True
         assert job["parameters"]["fake_source"]["stack_file"] == "data"
         assert job["parameters"]["fake_source"]["survey"] == ["s"]
         assert job["parameters"]["fake_source"]["filter"] == ["a", "b"]
