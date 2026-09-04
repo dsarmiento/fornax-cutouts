@@ -208,6 +208,7 @@ def api():
     try:
         with (
             patch("fornax_cutouts.app.api.discover_sources"),
+            patch("fornax_cutouts.app.api.sync_redis_client_factory", return_value=sync_redis),
             patch("fornax_cutouts.routes.v1.cutouts.async_uws.schedule_job") as mock_schedule,
             patch("fornax_cutouts.routes.v1.cutouts.sync.execute_cutout") as mock_cutout,
             patch("fornax_cutouts.routes.v1.cutouts.sync.execute_color_preview") as mock_color,
