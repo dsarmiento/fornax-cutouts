@@ -37,7 +37,7 @@ When no auth provider is registered, the provider returns `None`, or resolution 
 
 Client IP is resolved by `client_ip_from_request()`:
 
-1. **`X-Forwarded-For`**: split on commas and take the entry at index `-(num_trusted_proxies + 1)` — the rightmost client IP after stripping trusted proxy hops appended at the end of the list. This prevents clients from spoofing their IP by prepending values to `X-Forwarded-For`.
+1. **`X-Forwarded-For`**: split on commas and take the entry at index `-num_trusted_proxies` — the rightmost client IP after stripping trusted proxy hops appended at the end of the list. This prevents clients from spoofing their IP by prepending values to `X-Forwarded-For`.
 2. **`X-Real-IP`**: used when `X-Forwarded-For` is absent.
 3. **TCP peer address**: `request.client.host` as a last resort.
 
