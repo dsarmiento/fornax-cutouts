@@ -47,6 +47,7 @@ class MyMissionSource(AbstractMissionSource):
         filter=["g", "r", "i"],   # valid filter names
         survey=["wide"],          # valid survey names
     )
+    source_file_patterns = ("*/my-bucket/data/*",)
 
     def get_filenames(
         self,
@@ -88,6 +89,7 @@ class MyMissionSource(AbstractMissionSource):
 - Use `self._cast_list_parameter()` to normalize `filter` and `survey` from either a string or list to a list.
 - When a request omits `filter` or `survey`, the API does not pass them; your `get_filenames()` defaults apply.
 - Return an empty list if no files are found — never raise an exception for missing data.
+- Optional `source_file_patterns` to allow sync cutouts to infer `mission` for logs. The default (no patterns) stays `"sync"` and `color_preview`. Override `matches_source_file()` if globbing behavior needs customization. Async jobs pass mission explicitly and are not inferred.
 
 ---
 
@@ -301,5 +303,6 @@ curl http://localhost:8000/api/v0/cutouts/async/{job_id}/phase
 - [ ] `get_filenames()` handles both `TargetPosition` and `Positions` input
 - [ ] `get_filenames()` returns an empty list (not an exception) when no files are found
 - [ ] Optional: override `get_count()` if counting files is cheaper than returning the full list
+- [ ] Optional: set `source_file_patterns` so sync cutouts can infer `mission` from the filename
 - [ ] `filter` and `survey` are normalized with `_cast_list_parameter()`
 - [ ] Source appears in `GET /api/v0/missions` after startup

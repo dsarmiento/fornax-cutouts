@@ -129,3 +129,24 @@ class CutoutRegistry:
             ret.extend(filenames)
 
         return ret
+
+    def infer_mission(self, source_file: str) -> str | None:
+        """Return the unique registered mission whose patterns match ``source_file``.
+
+        Returns None when no source matches or more than one source matches.
+        """
+        matches = [name for name, src in self._SOURCES.items() if src.matches_source_file(source_file)]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            self.logger.warning(
+                "Ambiguous mission for %s: %s",
+                source_file,
+                matches,
+                extra={
+                    "event": "mission_inference_ambiguous",
+                    "source_file": source_file,
+                    "missions": matches,
+                },
+            )
+        return None
