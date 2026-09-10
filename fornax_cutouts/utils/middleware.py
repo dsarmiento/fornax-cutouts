@@ -29,8 +29,9 @@ def client_ip_from_request(request: Request) -> str | None:
 
     If there are no trusted proxies we take the raw TCP peer address.
 
-    Otherwise, take the rightmost IP in X-Forwarded-For after skipping N proxy-appended entries.
-    This prevents clients from spoofing their IP by injecting their own XFF header values at the front of the list.
+    Otherwise, take the entry at index -N in X-Forwarded-For — the rightmost client IP
+    after skipping N proxy-appended entries. This prevents clients from spoofing their IP
+    by injecting their own XFF header values at the front of the list.
 
     Falls back to X-Real-IP, then the raw TCP peer address.
     """
@@ -42,7 +43,7 @@ def client_ip_from_request(request: Request) -> str | None:
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
         ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
-        idx = -(CONFIG.num_trusted_proxies + 1)
+        idx = -CONFIG.num_trusted_proxies
         if len(ips) >= abs(idx):
             return ips[idx]
         return peer
