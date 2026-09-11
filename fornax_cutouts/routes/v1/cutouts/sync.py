@@ -100,7 +100,6 @@ class CutoutsSyncHandler:
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
         task_uid = uuid.uuid4().hex[:12]
 
-        # apply_async is a sync Kombu/Redis publish
         async_result = await enqueue_task(
             execute_cutout,
             kwargs={
@@ -119,7 +118,7 @@ class CutoutsSyncHandler:
         ret = await _wait_for_result(async_result, timeout=CONFIG.redis.timeout)
         ret = CutoutResponse.model_validate(ret)
 
-        # s3fs.sign blocks via fsspec.sync() (Event.wait and AWS credential I/O)
+        # _public_cutout_urls() blocks via fsspec calls so run it in a thread to avoid blocking the event loop
         return await asyncio.to_thread(_public_cutout_urls, ret)
 
     @sync_router.get(
@@ -146,7 +145,6 @@ class CutoutsSyncHandler:
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
         task_uid = uuid.uuid4().hex[:12]
 
-        # apply_async is a sync Kombu/Redis publish
         async_result = await enqueue_task(
             execute_color_preview,
             kwargs={
@@ -163,5 +161,5 @@ class CutoutsSyncHandler:
         ret = await _wait_for_result(async_result, timeout=CONFIG.redis.timeout)
         ret = CutoutResponse.model_validate(ret)
 
-        # s3fs.sign blocks via fsspec.sync() (Event.wait and AWS credential I/O)
+        # _public_cutout_urls() blocks via fsspec calls so run it in a thread to avoid blocking the event loop
         return await asyncio.to_thread(_public_cutout_urls, ret)

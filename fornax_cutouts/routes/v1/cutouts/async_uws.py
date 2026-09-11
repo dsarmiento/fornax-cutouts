@@ -152,7 +152,6 @@ class CutoutsUWSHandler:
                 window_seconds=principal.window_seconds,
             )
 
-            # apply_async is a sync Kombu/Redis publish
             await enqueue_task(
                 schedule_job,
                 task_id=f"schedule_job-{job_id}",

@@ -42,7 +42,10 @@ _PLACEHOLDER_MISSIONS = frozenset(("", "sync", "sync_cutout"))
 
 
 async def enqueue_task(task: Task | Callable[..., Any], **options: Any) -> Any:
-    """Enqueue a Celery task asynchronously in a thread."""
+    """Enqueue a Celery task asynchronously in a thread.
+
+    apply_async() is a Redis call so we run it in a thread to avoid blocking the event loop
+    """
 
     # @celery_app.task decorator returns a Task at runtime; type checkers see a function
     return await asyncio.to_thread(cast(Task, task).apply_async, **options)
