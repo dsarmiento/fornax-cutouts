@@ -1,19 +1,20 @@
+import asyncio
 import gc
 import time
 from abc import abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Sequence
+from typing import Any, Sequence, cast
 from urllib.parse import urlparse
 
 import astrocut
 from astropy.coordinates import SkyCoord
 from celery import Task
 from fsspec import AbstractFileSystem, filesystem
-from vo_models.uws.models import ExecutionPhase
-from vo_models.uws.types import ErrorType
+from vo_models.uws.types import ErrorType, ExecutionPhase
 
 from fornax_cutouts.app.celery_app import celery_app, get_pool_size_for_queue, logger, redis_client_factory
 from fornax_cutouts.auth.limits import CutoutLimiter
@@ -38,6 +39,13 @@ EXECUTE_CUTOUT_TASK_ID_TEMPLATE = "execute_cutout-{job_id}-{batch_num}-{incremen
 FITS_SUFFIXES = (".fit", ".fits", ".fts", ".fits.gz", ".fits.fz")
 ASDF_SUFFIXES = (".asdf",)
 _PLACEHOLDER_MISSIONS = frozenset(("", "sync", "sync_cutout"))
+
+
+async def enqueue_task(task: Task | Callable[..., Any], **options: Any) -> Any:
+    """Enqueue a Celery task asynchronously in a thread."""
+
+    # @celery_app.task decorator returns a Task at runtime; type checkers see a function
+    return await asyncio.to_thread(cast(Task, task).apply_async, **options)
 
 
 def _resolve_mission(source_file: str, mission: str = "", default: str = "sync") -> str:
