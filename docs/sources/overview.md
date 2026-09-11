@@ -44,6 +44,7 @@ No imports or explicit registration calls are needed in your application code â€
 | `get_mission_metadata()`                               | Returns a dict mapping mission names to their `MissionMetadata`.                                                     |
 | `validate_mission_params(mission_params, size)`        | Validates request parameters against each mission's constraints. Returns a dict of `{mission: bool}`.                |
 | `get_target_filenames(position, mission_params, size)` | Calls `get_filenames()` on each requested mission and returns the combined list of `FilenameLookupResponse` objects. |
+| `infer_mission(source_file)`                           | Returns the unique registered mission whose `source_file_patterns` match the filename, or `None`.                     |
 
 ---
 
@@ -82,6 +83,8 @@ Every source must subclass `AbstractMissionSource` and provide:
 2. An implementation of `get_filenames()`
 
 `get_count()` has a default implementation that calls `get_filenames()` and sums the filename lists. Override it with a cheaper query (for example `COUNT(*)`) when the UI needs a file count without the full list.
+
+Optional `source_file_patterns` to allow sync cutouts to infer `mission` for logs. The default is no patterns, which leaves mission as `"sync"` and `color_preview`. Override `matches_source_file()` if globbing behavior needs customization. Async jobs pass mission explicitly and are not inferred.
 
 ```python
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata

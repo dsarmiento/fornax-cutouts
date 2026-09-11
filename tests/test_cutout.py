@@ -36,6 +36,22 @@ def test_generate_cutout_fits():
     assert response.filter == "abc"
 
 
+@mock.patch("fornax_cutouts.jobs.tasks.cutout_registry.infer_mission", return_value="ps1")
+@mock.patch("astrocut.FITSCutout", make_fitscutout_mock)
+@mock.patch("fornax_cutouts.jobs.tasks.setup_filesystem", mock.MagicMock())
+@mock.patch("os.stat", mock.MagicMock(return_value=mock.MagicMock(st_size=12345)))
+@mock.patch("fornax_cutouts.jobs.tasks.FITSCutoutHandler.get_filter", mock.MagicMock(return_value="abc"))
+def test_generate_cutout_infers_mission(_infer_mission):
+    response = generate_cutout(
+        source_file=CUTOUT_FILE_FITS,
+        target=TargetPosition(ra=0.0, dec=0.0),
+        size=(100, 100),
+        output_dir="testdir",
+        mission="sync",
+    )
+    assert response.mission == "ps1"
+
+
 def test_generate_cutout_asdf(tmp_path):
     """Test that we can generate a cutout from an ASDF file"""
     cutout_ra = 8.46340835

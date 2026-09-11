@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from fnmatch import fnmatch
 
 from pydantic import BaseModel
 
@@ -21,6 +22,9 @@ class MissionMetadata(BaseModel):
 
 class AbstractMissionSource(ABC):
     metadata: MissionMetadata
+
+    # filename patterns to associate with the source
+    source_file_patterns: tuple[str, ...] = ()
 
     @property
     def logger(self) -> logging.Logger:
@@ -58,6 +62,10 @@ class AbstractMissionSource(ABC):
         is_valid &= self._validate_list_parameter(survey, self.metadata.survey)
 
         return is_valid
+
+    def matches_source_file(self, source_file: str) -> bool:
+        """Return True if ``source_file`` matches this source's filename patterns."""
+        return any(fnmatch(source_file, pattern) for pattern in self.source_file_patterns)
 
     @abstractmethod
     def get_filenames(

@@ -37,6 +37,19 @@ EXECUTE_CUTOUT_TASK_ID_TEMPLATE = "execute_cutout-{job_id}-{batch_num}-{incremen
 
 FITS_SUFFIXES = (".fit", ".fits", ".fts", ".fits.gz", ".fits.fz")
 ASDF_SUFFIXES = (".asdf",)
+_PLACEHOLDER_MISSIONS = frozenset(("", "sync", "sync_cutout"))
+
+
+def _resolve_mission(source_file: str, mission: str = "", default: str = "sync") -> str:
+    """Resolve the mission for a given source file.
+
+    If mission is already known, return it.
+    Otherwise, resolve the mission using the cutout registry.
+    If the mission cannot be resolved, return the default.
+    """
+    if mission not in _PLACEHOLDER_MISSIONS:
+        return mission
+    return cutout_registry.infer_mission(source_file) or default
 
 
 @celery_app.task(
@@ -727,6 +740,7 @@ def generate_cutout(
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to {}.
     """
+    mission = _resolve_mission(source_file, mission)
     start_time = time.perf_counter()
 
     cutout_path = urlparse(source_file).path
@@ -865,6 +879,7 @@ def generate_color_preview(
     """
     Generate a color preview of a cutout
     """
+    mission = _resolve_mission(red, default="color_preview")
     cutout_path = urlparse(red).path
     cutout_file = Path(cutout_path).name
     cutout_stem = get_cutout_stem(cutout_file, ASDF_SUFFIXES + FITS_SUFFIXES)
@@ -911,9 +926,10 @@ def generate_color_preview(
         upload_time = time.perf_counter()
 
     logger.info(
-        f"Color preview generated: size={size[0]}x{size[1]}px",
+        f"Color preview generated: mission='{mission}' size={size[0]}x{size[1]}px",
         extra={
             "event": "color_preview_generated",
+            "mission": mission,
             "target": {
                 "ra": target.ra,
                 "dec": target.dec,
@@ -948,7 +964,7 @@ def generate_color_preview(
     )
 
     return CutoutResponse(
-        mission="color_preview",
+        mission=mission,
         position=target,
         size_px=size,
         filter=ColorFilter(
@@ -1028,6 +1044,7 @@ def execute_cutout(  # noqa: C901
         batch_num (int): Async batch identifier; 0 for non-batched (e.g. sync) tasks.
         increment_id (int): Index within the batch for Redis aggregation.
     """
+    mission = _resolve_mission(source_file, mission)
     is_async = job_id != "sync"
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
