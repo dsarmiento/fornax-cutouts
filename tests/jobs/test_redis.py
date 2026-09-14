@@ -55,6 +55,22 @@ class TestAsyncJobTTL:
         assert abs(ttl_after - ttl_before) <= 2
 
 
+class TestSyncRedisCutoutJobLifecycle:
+    def test_start_job_sets_executing_and_start_time(self, redis_clients, job_id):
+        job = SyncRedisCutoutJob(redis_client=redis_clients.sync, job_id=job_id)
+        job.start_job()
+        uws = redis_clients.sync.json().get(RedisKeys(job_id).uws)
+        assert uws["phase"] == ExecutionPhase.EXECUTING
+        assert uws["start_time"] is not None
+
+    def test_start_job_is_idempotent(self, redis_clients, job_id):
+        job = SyncRedisCutoutJob(redis_client=redis_clients.sync, job_id=job_id)
+        job.start_job()
+        start_time = redis_clients.sync.json().get(RedisKeys(job_id).uws, "$.start_time")[0]
+        job.start_job()
+        assert redis_clients.sync.json().get(RedisKeys(job_id).uws, "$.start_time")[0] == start_time
+
+
 class TestSyncRedisCutoutJobTTL:
     def test_set_total_task_count_preserves_ttl(self, redis_clients, job_id):
         job = SyncRedisCutoutJob(redis_client=redis_clients.sync, job_id=job_id)

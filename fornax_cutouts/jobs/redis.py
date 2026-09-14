@@ -705,6 +705,14 @@ class SyncRedisCutoutJob:
         pass
 
     def start_job(self):
+        current_phase = self.__redis_client.json().get(self.__keys.uws, "$.phase")
+        if current_phase and current_phase[0] in (
+            ExecutionPhase.EXECUTING,
+            ExecutionPhase.COMPLETED,
+            ExecutionPhase.ERROR,
+            ExecutionPhase.ABORTED,
+        ):
+            return
         self.update_job_phase(ExecutionPhase.EXECUTING)
         self.set_start_time()
 

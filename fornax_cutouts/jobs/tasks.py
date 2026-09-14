@@ -208,12 +208,13 @@ def schedule_job(
 
     metadata_update_time = time.perf_counter()
 
-    # Dispatch the first batch.
+    # Dispatch the first batch and update the UWS job status to started.
     batch_num = r.increment_batch_num()
     batch_cutouts.apply_async(
         kwargs={"job_id": job_id, "batch_num": batch_num},
         task_id=BATCH_CUTOUTS_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
     )
+    r.start_job()
 
     batch_cutouts_task_time = time.perf_counter()
 
