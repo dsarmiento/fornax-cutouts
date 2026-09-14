@@ -87,7 +87,7 @@ class FornaxCutoutsConfig(BaseSettings):
     num_trusted_proxies: int = Field(default=0, ge=0)
 
     sync_ttl: int = 1 * 60 * 60  # 1 Hour
-    async_ttl: int = 7 * 24 * 60 * 60  # 1 Week
+    async_ttl: int = 5 * 60  # UNDO AFTER TESTING: 7 * 24 * 60 * 60  # 1 Week
 
     source_path: Path
 
