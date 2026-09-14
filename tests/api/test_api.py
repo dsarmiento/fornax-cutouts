@@ -1,6 +1,8 @@
 """Tests for the API"""
 
+import asyncio
 import json
+from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from xml.etree import ElementTree as ET
@@ -114,6 +116,24 @@ def _params_by_id(root):
 def _bust_valid_sources():
     if hasattr(cutout_registry, "_VALID_SOURCES"):
         del cutout_registry._VALID_SOURCES
+
+
+def _offloaded_funcs(monkeypatch):
+    """Spy on asyncio.to_thread; return a list that will be populated with callables offloaded to a thread."""
+    recorded = []
+    orig_to_thread = asyncio.to_thread
+
+    async def spy(func, /, *args, **kwargs):
+        recorded.append(func)
+        return await orig_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", spy)
+    return recorded
+
+
+def _offloaded_names(recorded: list[Callable]) -> list[str | None]:
+    """Get the names of the callables in "recorded" (what was offloaded to a thread)."""
+    return [getattr(fn, "__name__", None) for fn in recorded]
 
 
 class FakeSource(AbstractMissionSource):
@@ -329,6 +349,66 @@ class TestSync:
                 params={"filename": _SYNC_FILENAME, "ra": _SYNC_RA, "dec": _SYNC_DEC, "size": _SYNC_SIZE},
             )
 
+    def test_single_cutout_enqueues_off_loop(self, api, monkeypatch):
+        recorded = _offloaded_funcs(monkeypatch)
+        response = api.client.get(
+            "/api/v0/cutouts/sync/single",
+            params={"filename": _SYNC_FILENAME, "ra": _SYNC_RA, "dec": _SYNC_DEC, "size": _SYNC_SIZE},
+        )
+        assert response.status_code == 200
+        assert api.execute_cutout.apply_async in recorded
+
+    def test_color_preview_enqueues_off_loop(self, api, monkeypatch):
+        recorded = _offloaded_funcs(monkeypatch)
+        response = api.client.get(
+            "/api/v0/cutouts/sync/color",
+            params={
+                "red": _SYNC_RED,
+                "green": _SYNC_GREEN,
+                "blue": _SYNC_BLUE,
+                "ra": _SYNC_RA,
+                "dec": _SYNC_DEC,
+                "size": _SYNC_SIZE,
+            },
+        )
+        assert response.status_code == 200
+        assert api.execute_color_preview.apply_async in recorded
+
+    def test_single_cutout_signs_s3_urls_off_loop(self, api, monkeypatch):
+        recorded = _offloaded_funcs(monkeypatch)
+        monkeypatch.setattr(CONFIG.storage, "prefix", "s3://bucket")
+        monkeypatch.setattr("fornax_cutouts.routes.v1.cutouts.sync._s3_fs", None, raising=False)
+        mock_fs = MagicMock()
+        mock_fs.sign.side_effect = lambda path, expiration=None: f"signed:{path}"
+        with patch("fornax_cutouts.routes.v1.cutouts.sync.filesystem", return_value=mock_fs):
+            response = api.client.get(
+                "/api/v0/cutouts/sync/single",
+                params={"filename": _SYNC_FILENAME, "ra": _SYNC_RA, "dec": _SYNC_DEC, "size": _SYNC_SIZE},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["science"] == f"signed:{_SINGLE_CUTOUT_RESULT['science']}"
+        assert body["preview"] == f"signed:{_SINGLE_CUTOUT_RESULT['preview']}"
+        assert mock_fs.sign.call_count == 2
+        assert "_public_cutout_urls" in _offloaded_names(recorded)
+
+    def test_single_cutout_strips_local_prefix(self, api, monkeypatch):
+        monkeypatch.setattr(CONFIG.storage, "prefix", "/data")
+        payload = {
+            **_SINGLE_CUTOUT_RESULT,
+            "science": "/data/cutouts/sync/job/file.fits",
+            "preview": "/data/cutouts/sync/job/file.jpg",
+        }
+        api.execute_cutout.apply_async.return_value = _celery_result(payload)
+        response = api.client.get(
+            "/api/v0/cutouts/sync/single",
+            params={"filename": _SYNC_FILENAME, "ra": _SYNC_RA, "dec": _SYNC_DEC, "size": _SYNC_SIZE},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["science"] == "/cutouts/sync/job/file.fits"
+        assert body["preview"] == "/cutouts/sync/job/file.jpg"
+
 
 class TestMetadata:
     def test_all_missions(self, client):
@@ -507,6 +587,12 @@ class TestAsyncUWS:
         assert job["parameters"]["position_count"] == len(_POSITIONS)
         assert api.redis.lrange(RedisKeys(job_id).positions, 0, -1) == _POSITIONS
 
+    def test_request_job_enqueues_off_loop(self, api, monkeypatch):
+        recorded = _offloaded_funcs(monkeypatch)
+        response = api.client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+        assert response.status_code == 303
+        assert api.schedule_job.apply_async in recorded
+
     def test_job_list_redirects_without_last(self, client):
         response = client.get("/api/v0/cutouts/async", follow_redirects=False)
         assert response.status_code == 303
@@ -658,6 +744,27 @@ class TestJobSpecific:
         assert body["metadata"]["page"] == 0
         assert body["metadata"]["limit"] == 2
         assert "next" in body["links"]
+
+    def test_results_cutouts_offloaded(self, client, job_id, tmp_path, monkeypatch):
+        monkeypatch.setattr(CONFIG.storage, "prefix", str(tmp_path))
+        rows = [
+            CutoutResponse(
+                mission="fake_source",
+                position=TargetPosition(float(i), float(i + 1)),
+                size_px=(256, 256),
+                science=f"cutouts/a{i}.fits",
+                preview=f"cutouts/a{i}.jpg",
+            )
+            for i in range(3)
+        ]
+        CutoutResults(job_id).add_results(rows, batch_num=0)
+        recorded = _offloaded_funcs(monkeypatch)
+        response = client.get(
+            f"/api/v0/cutouts/async/{job_id}/results/cutouts",
+            params={"output_format": "json", "page": 0, "limit": 2},
+        )
+        assert response.status_code == 200
+        assert "render_cutout_results" in _offloaded_names(recorded)
 
     def test_invalid_output_format(self, client, job_id):
         response = client.get(

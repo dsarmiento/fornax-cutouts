@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from enum import StrEnum
@@ -17,8 +18,8 @@ from fornax_cutouts.auth import Principal, auth_registry
 from fornax_cutouts.auth.limits import CutoutLimiter
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, async_redis_client_factory
-from fornax_cutouts.jobs.results import CutoutResults
-from fornax_cutouts.jobs.tasks import schedule_job
+from fornax_cutouts.jobs.results import render_cutout_results
+from fornax_cutouts.jobs.tasks import enqueue_task, schedule_job
 from fornax_cutouts.models.metadata import MultiMissionCutoutRequest
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
 from fornax_cutouts.utils.form_data import _filename_params, form_parser
@@ -151,7 +152,8 @@ class CutoutsUWSHandler:
                 window_seconds=principal.window_seconds,
             )
 
-            schedule_job.apply_async(
+            await enqueue_task(
+                schedule_job,
                 task_id=f"schedule_job-{job_id}",
                 kwargs={"job_id": job_id},
             )
@@ -445,21 +447,19 @@ class CutoutsUWSHandler:
         """
         Return job cutout results in a table format
         """
-        job_results = CutoutResults(job_id)
+        if output_format not in ("json", "csv", "votable", "xml"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid output format: {output_format}",
+            )
 
+        # render_cutout_results does sync DuckDB/S3 parquet reads, pandas, and VOTable XML
+        payload = await asyncio.to_thread(render_cutout_results, job_id, output_format, page, limit, str(request.url))
         if output_format == "json":
-            return job_results.to_py(page=page, limit=limit, base_url=request.url)
-
+            return payload
         if output_format == "csv":
-            return CsvResponse(job_results.to_csv(page=page, limit=limit, base_url=request.url))
-
-        if output_format in ["votable", "xml"]:
-            return XmlResponse(job_results.to_votable(page=page, limit=limit, base_url=request.url))
-
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid output format: {output_format}",
-        )
+            return CsvResponse(payload)
+        return XmlResponse(payload)
 
     @uws_router.get(
         "/async/{job_id}/parameters",

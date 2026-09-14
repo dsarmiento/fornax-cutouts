@@ -162,3 +162,19 @@ class CutoutResults:
         vo_io = BytesIO()
         vo_t.to_xml(vo_io)
         return vo_io.getvalue().decode()
+
+
+def render_cutout_results(
+    job_id: str,
+    output_format: str,
+    page: int,
+    limit: int,
+    base_url: str,
+):
+    """Render the cutout results for a given job ID and output format."""
+    job_results = CutoutResults(job_id)
+    if output_format == "json":
+        return job_results.to_py(page=page, limit=limit, base_url=base_url)
+    if output_format == "csv":
+        return job_results.to_csv(page=page, limit=limit, base_url=base_url)
+    return job_results.to_votable(page=page, limit=limit, base_url=base_url)

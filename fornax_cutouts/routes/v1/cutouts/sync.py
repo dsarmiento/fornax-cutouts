@@ -10,11 +10,38 @@ from fastapi_utils.cbv import cbv
 from fsspec import AbstractFileSystem, filesystem
 
 from fornax_cutouts.config import CONFIG
-from fornax_cutouts.jobs.tasks import execute_color_preview, execute_cutout
+from fornax_cutouts.jobs.tasks import enqueue_task, execute_color_preview, execute_cutout
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
 
 sync_router = APIRouter(prefix="/cutouts", tags=["Sync Cutouts"])
+_s3_fs: AbstractFileSystem | None = None
+
+
+def _get_s3_fs() -> AbstractFileSystem:
+    """Get and/or assign the S3 filesystem singleton."""
+    global _s3_fs
+    fs = _s3_fs
+    if fs is None:
+        fs = filesystem("s3")
+        _s3_fs = fs
+    return fs
+
+
+def _public_cutout_urls(ret: CutoutResponse) -> CutoutResponse:
+    """Publicly sign cutout URLs for S3 storage."""
+    if CONFIG.storage.is_s3:
+        fs = _get_s3_fs()
+        if ret.science:
+            ret.science = fs.sign(ret.science, expiration=CONFIG.sync_ttl)
+        if ret.preview:
+            ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
+    else:
+        if ret.science:
+            ret.science = ret.science.replace(CONFIG.storage.prefix, "")
+        if ret.preview:
+            ret.preview = ret.preview.replace(CONFIG.storage.prefix, "")
+    return ret
 
 
 async def _wait_for_result(async_result, timeout: float = 15.0, poll_interval: float = 0.2):
@@ -72,7 +99,9 @@ class CutoutsSyncHandler:
 
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
         task_uid = uuid.uuid4().hex[:12]
-        async_result = execute_cutout.apply_async(
+
+        async_result = await enqueue_task(
+            execute_cutout,
             kwargs={
                 "job_id": job_id,
                 "source_file": filename,
@@ -89,19 +118,8 @@ class CutoutsSyncHandler:
         ret = await _wait_for_result(async_result, timeout=CONFIG.redis.timeout)
         ret = CutoutResponse.model_validate(ret)
 
-        if CONFIG.storage.is_s3:
-            fs: AbstractFileSystem = filesystem("s3")
-            if ret.science:
-                ret.science = fs.sign(ret.science, expiration=CONFIG.sync_ttl)
-            if ret.preview:
-                ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
-        else:
-            if ret.science:
-                ret.science = ret.science.replace(CONFIG.storage.prefix, "")
-            if ret.preview:
-                ret.preview = ret.preview.replace(CONFIG.storage.prefix, "")
-
-        return ret
+        # _public_cutout_urls() blocks via fsspec calls so run it in a thread to avoid blocking the event loop
+        return await asyncio.to_thread(_public_cutout_urls, ret)
 
     @sync_router.get(
         "/sync/color",
@@ -126,7 +144,9 @@ class CutoutsSyncHandler:
 
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
         task_uid = uuid.uuid4().hex[:12]
-        async_result = execute_color_preview.apply_async(
+
+        async_result = await enqueue_task(
+            execute_color_preview,
             kwargs={
                 "red": red,
                 "green": green,
@@ -141,10 +161,5 @@ class CutoutsSyncHandler:
         ret = await _wait_for_result(async_result, timeout=CONFIG.redis.timeout)
         ret = CutoutResponse.model_validate(ret)
 
-        if CONFIG.storage.is_s3:
-            fs: AbstractFileSystem = filesystem("s3")
-            ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
-        else:
-            ret.preview = ret.preview.replace(CONFIG.storage.prefix, "")
-
-        return ret
+        # _public_cutout_urls() blocks via fsspec calls so run it in a thread to avoid blocking the event loop
+        return await asyncio.to_thread(_public_cutout_urls, ret)
