@@ -276,9 +276,13 @@ class CutoutsUWSHandler:
     @uws_router.get(
         "/async/{job_id}/destruction",
         summary="Get destruction time",
-        description=f"Returns proposed job destruction time. Currently returns 501 Not Implemented.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+        description=(
+            f"Returns the job destruction time (creation + CUTOUTS__ASYNC_TTL). "
+            f"Async job state in Redis expires at this time.\n\n"
+            f"{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}"
+        ),
     )
-    def get_job_destruction(
+    async def get_job_destruction(
         self,
         job_id: Annotated[
             str,
@@ -289,7 +293,9 @@ class CutoutsUWSHandler:
         Return job details per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
-        return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
+        uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
+        job_summary = await uws_job.get_job_summary()
+        return job_summary.destruction
 
     @uws_router.post(
         "/async/{job_id}/destruction",

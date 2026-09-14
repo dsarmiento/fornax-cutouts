@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from xml.etree import ElementTree as ET
@@ -681,7 +683,12 @@ class TestJobSpecific:
 
     def test_destruction(self, client, job_id):
         response = client.get(f"/api/v0/cutouts/async/{job_id}/destruction")
-        assert response.status_code == 501
+        assert response.status_code == 200
+        destruction = response.json()
+        assert isinstance(destruction, str)
+        destruction_ts = datetime.fromisoformat(destruction.replace("Z", "+00:00")).timestamp()
+        now = time.time()
+        assert CONFIG.async_ttl - 60 <= destruction_ts - now <= CONFIG.async_ttl + 60
 
     def test_error(self, client, job_id):
         response = client.get(f"/api/v0/cutouts/async/{job_id}/error")

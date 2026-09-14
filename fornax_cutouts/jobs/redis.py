@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Generator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from redis import Redis as SyncRedisClient
@@ -99,6 +99,32 @@ class RedisKeys:
 
     def batch_started(self, batch_num: int) -> str:
         return f"{CUTOUT_JOB_PREFIX}:{self.job_id}:batch:{batch_num}:started"
+
+    @property
+    def job_keys(self) -> list[str]:
+        return [
+            self.uws,
+            self.positions,
+            self.pending_tasks,
+            self.failed_tasks,
+            self.cutout_limit_identity,
+            self.cutout_limit_max,
+            self.cutout_limit_window_seconds,
+            self.current_batch_num,
+            self.queued_task_count,
+            self.executing_task_count,
+            self.completed_task_count,
+            self.skipped_task_count,
+            self.total_task_count,
+        ]
+
+    def batch_keys(self, batch_num: int) -> list[str]:
+        return [
+            self.batch_outstanding(batch_num),
+            self.batch_descriptors(batch_num),
+            self.batch_results(batch_num),
+            self.batch_started(batch_num),
+        ]
 
 
 @dataclass
@@ -261,14 +287,16 @@ class AsyncRedisCutoutJob:
 
         await self.__update_uws(path=f"$.{time_field}", obj=time.timestamp())
 
+        return time
+
     async def __set_create_time(self):
-        await self.__set_time(time_field="creation_time")
+        return await self.__set_time(time_field="creation_time")
 
     async def __set_quote(self, quote: datetime):
-        await self.__set_time(time_field="quote", time=quote)
+        return await self.__set_time(time_field="quote", time=quote)
 
     async def __set_destruction(self, destruction: datetime):
-        await self.__set_time(time_field="destruction", time=destruction)
+        return await self.__set_time(time_field="destruction", time=destruction)
 
     async def create_job(
         self,
@@ -314,7 +342,10 @@ class AsyncRedisCutoutJob:
                 pipe.rpush(self.__keys.positions, *batch_positions)
             await pipe.execute()
 
-        await self.__set_create_time()
+        create_time = await self.__set_create_time()
+
+        destruction_time = create_time + timedelta(seconds=CONFIG.async_ttl)
+        await self.__set_destruction(destruction_time)
 
         async with self.__redis_client.pipeline() as pipe:
             pipe.set(self.__keys.total_task_count, 0)
@@ -327,6 +358,8 @@ class AsyncRedisCutoutJob:
                 pipe.set(self.__keys.cutout_limit_max, cutout_limit)
             if window_seconds is not None:
                 pipe.set(self.__keys.cutout_limit_window_seconds, window_seconds)
+            for key in self.__keys.job_keys:
+                pipe.expireat(key, int(destruction_time.timestamp()))
             await pipe.execute()
 
     async def get_job_summary(self, base_url: str = "") -> JobSummary:
@@ -401,6 +434,25 @@ class SyncRedisCutoutJob:
         self.job_id = job_id
         self.__redis_client = redis_client
         self.__keys = RedisKeys(job_id)
+        self.__destruction_ts: float | None = None
+
+    def __get_destruction_ts(self) -> float:
+        if self.__destruction_ts is None:
+            destruction = self.__redis_client.json().get(self.__keys.uws, "$.destruction")
+            if destruction and destruction[0] is not None:
+                self.__destruction_ts = float(destruction[0])
+            else:
+                creation = self.__redis_client.json().get(self.__keys.uws, "$.creation_time")
+                if creation and creation[0] is not None:
+                    self.__destruction_ts = float(creation[0]) + CONFIG.async_ttl
+                else:
+                    self.__destruction_ts = datetime.now().timestamp() + CONFIG.async_ttl
+        return self.__destruction_ts
+
+    def __expire(self, pipe, *keys: str) -> None:
+        destruction_ts = int(self.__get_destruction_ts())
+        for key in keys:
+            pipe.expireat(key, destruction_ts)
 
     def __update_uws(self, path: str, obj: Any):
         self.__redis_client.json().set(
@@ -477,7 +529,10 @@ class SyncRedisCutoutJob:
 
     def push_pending_tasks(self, all_task_kwargs: list[dict]):
         all_tasks = [json_dumps_with_encoders(task_kwargs) for task_kwargs in all_task_kwargs]
-        self.__redis_client.rpush(self.__keys.pending_tasks, *all_tasks)
+        with self.__redis_client.pipeline() as pipe:
+            pipe.rpush(self.__keys.pending_tasks, *all_tasks)
+            self.__expire(pipe, self.__keys.pending_tasks)
+            pipe.execute()
 
     def clear_pending_tasks(self) -> int:
         """Discard all not-yet-dispatched pending tasks for this job; returns how many were removed."""
@@ -490,7 +545,10 @@ class SyncRedisCutoutJob:
 
     def push_failed_task(self, task_kwargs: dict, error_message: str):
         task_kwargs["error_message"] = error_message
-        self.__redis_client.rpush(self.__keys.failed_tasks, json_dumps_with_encoders(task_kwargs))
+        with self.__redis_client.pipeline() as pipe:
+            pipe.rpush(self.__keys.failed_tasks, json_dumps_with_encoders(task_kwargs))
+            self.__expire(pipe, self.__keys.failed_tasks)
+            pipe.execute()
 
     def pop_pending_tasks(self, max_tasks: int) -> list[dict]:
         all_task_kwargs = self.__redis_client.lpop(self.__keys.pending_tasks, max_tasks)
@@ -498,7 +556,7 @@ class SyncRedisCutoutJob:
         return all_task_kwargs
 
     def set_total_task_count(self, total_count: int):
-        self.__redis_client.set(self.__keys.total_task_count, total_count)
+        self.__redis_client.set(self.__keys.total_task_count, total_count, keepttl=True)
 
     def get_batch_num(self) -> int:
         count = self.__redis_client.get(self.__keys.current_batch_num)
@@ -520,7 +578,11 @@ class SyncRedisCutoutJob:
         return self.__redis_client.decrby(self.__keys.executing_task_count, amount)
 
     def increment_skipped_task_count(self, amount: int = 1) -> int:
-        return self.__redis_client.incrby(self.__keys.skipped_task_count, amount)
+        with self.__redis_client.pipeline() as pipe:
+            pipe.incrby(self.__keys.skipped_task_count, amount)
+            self.__expire(pipe, self.__keys.skipped_task_count)
+            result, _ = pipe.execute()
+        return result
 
     def increment_completed_task_count(self, amount: int = 1) -> int:
         return self.__redis_client.incrby(self.__keys.completed_task_count, amount)
@@ -535,16 +597,13 @@ class SyncRedisCutoutJob:
         self.__redis_client.decrby(TOTAL_PENDING_TASKS_KEY, amount)
 
     def delete_batch_keys(self, batch_num: int):
-        keys = [
-            self.__keys.batch_outstanding(batch_num),
-            self.__keys.batch_descriptors(batch_num),
-            self.__keys.batch_results(batch_num),
-            self.__keys.batch_started(batch_num),
-        ]
-        self.__redis_client.delete(*keys)
+        self.__redis_client.delete(*self.__keys.batch_keys(batch_num))
 
     def set_batch_outstanding(self, batch_num: int, count: int):
-        self.__redis_client.set(self.__keys.batch_outstanding(batch_num), count)
+        with self.__redis_client.pipeline() as pipe:
+            pipe.set(self.__keys.batch_outstanding(batch_num), count)
+            self.__expire(pipe, self.__keys.batch_outstanding(batch_num))
+            pipe.execute()
 
     def get_batch_outstanding(self, batch_num: int) -> int:
         raw = self.__redis_client.get(self.__keys.batch_outstanding(batch_num))
@@ -554,10 +613,16 @@ class SyncRedisCutoutJob:
         return self.__redis_client.decr(self.__keys.batch_outstanding(batch_num))
 
     def reset_batch_outstanding(self, batch_num: int):
-        self.__redis_client.set(self.__keys.batch_outstanding(batch_num), 0)
+        with self.__redis_client.pipeline() as pipe:
+            pipe.set(self.__keys.batch_outstanding(batch_num), 0)
+            self.__expire(pipe, self.__keys.batch_outstanding(batch_num))
+            pipe.execute()
 
     def set_batch_descriptors(self, batch_num: int, descriptors: list[dict]):
-        self.__redis_client.set(self.__keys.batch_descriptors(batch_num), json.dumps(descriptors))
+        with self.__redis_client.pipeline() as pipe:
+            pipe.set(self.__keys.batch_descriptors(batch_num), json.dumps(descriptors))
+            self.__expire(pipe, self.__keys.batch_descriptors(batch_num))
+            pipe.execute()
 
     def get_batch_descriptors(self, batch_num: int) -> list[dict]:
         raw = self.__redis_client.get(self.__keys.batch_descriptors(batch_num))
@@ -566,13 +631,19 @@ class SyncRedisCutoutJob:
         return json.loads(raw)
 
     def record_batch_task_result(self, batch_num: int, increment_id: int, result_json: str):
-        self.__redis_client.hset(self.__keys.batch_results(batch_num), str(increment_id), result_json)
+        with self.__redis_client.pipeline() as pipe:
+            pipe.hset(self.__keys.batch_results(batch_num), str(increment_id), result_json)
+            self.__expire(pipe, self.__keys.batch_results(batch_num))
+            pipe.execute()
 
     def batch_result_hexists(self, batch_num: int, increment_id: int) -> bool:
         return bool(self.__redis_client.hexists(self.__keys.batch_results(batch_num), str(increment_id)))
 
     def mark_batch_task_started(self, batch_num: int, increment_id: int):
-        self.__redis_client.hset(self.__keys.batch_started(batch_num), str(increment_id), "1")
+        with self.__redis_client.pipeline() as pipe:
+            pipe.hset(self.__keys.batch_started(batch_num), str(increment_id), "1")
+            self.__expire(pipe, self.__keys.batch_started(batch_num))
+            pipe.execute()
 
     def batch_task_was_started(self, batch_num: int, increment_id: int) -> bool:
         return bool(self.__redis_client.hexists(self.__keys.batch_started(batch_num), str(increment_id)))
@@ -588,6 +659,7 @@ class SyncRedisCutoutJob:
             pipe.hset(self.__keys.batch_started(batch_num), str(increment_id), "1")
             pipe.decr(self.__keys.queued_task_count)
             pipe.incr(self.__keys.executing_task_count)
+            self.__expire(pipe, self.__keys.batch_started(batch_num))
             pipe.execute()
 
     def skip_task(self, batch_num: int, increment_id: int) -> int:
@@ -596,7 +668,8 @@ class SyncRedisCutoutJob:
             pipe.decr(self.__keys.batch_outstanding(batch_num))
             pipe.decr(self.__keys.executing_task_count)
             pipe.incr(self.__keys.skipped_task_count)
-            _, remaining, _, _ = pipe.execute()
+            self.__expire(pipe, self.__keys.batch_results(batch_num), self.__keys.skipped_task_count)
+            _, remaining, _, _, _ = pipe.execute()
         return int(remaining) if remaining else 0
 
     def fail_task(self, batch_num: int, increment_id: int, task_kwargs: dict, error_message: str) -> int:
@@ -606,7 +679,8 @@ class SyncRedisCutoutJob:
             pipe.decr(self.__keys.batch_outstanding(batch_num))
             pipe.decr(self.__keys.executing_task_count)
             pipe.rpush(self.__keys.failed_tasks, json_dumps_with_encoders(task_kwargs))
-            _, remaining, _, _ = pipe.execute()
+            self.__expire(pipe, self.__keys.batch_results(batch_num), self.__keys.failed_tasks)
+            _, remaining, _, _, _ = pipe.execute()
         return int(remaining) if remaining else 0
 
     def complete_task(self, batch_num: int, increment_id: int, result_json: str) -> int:
@@ -615,7 +689,8 @@ class SyncRedisCutoutJob:
             pipe.decr(self.__keys.batch_outstanding(batch_num))
             pipe.decr(self.__keys.executing_task_count)
             pipe.incr(self.__keys.completed_task_count)
-            _, remaining, _, _ = pipe.execute()
+            self.__expire(pipe, self.__keys.batch_results(batch_num))
+            _, remaining, _, _, _ = pipe.execute()
         return int(remaining) if remaining else 0
 
     # Batch operations

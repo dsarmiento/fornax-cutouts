@@ -43,7 +43,7 @@ When the service is running, full interactive documentation is available at:
 ### Missions & Metadata
 
 | Method | Path                                | Description                                                                                                                 |
-|--------|-------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| ------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/api/v0/missions`                  | List all registered mission sources with their metadata (name, pixel size, max cutout size, available filters and surveys). |
 | `GET`  | `/api/v0/missions/{mission}`        | Metadata for a single mission. Returns 404 if the mission is not registered.                                                |
 | `POST` | `/api/v0/filenames`                 | Look up source FITS filenames for one or more missions given sky positions.                                                 |
@@ -79,7 +79,9 @@ For S3 storage backends, sync results are returned as presigned URLs valid for `
 
 ### Async Cutouts (UWS)
 
-The async endpoints implement the [IVOA UWS 1.1](https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html) standard. Jobs are queued in Redis and executed by Celery workers. Results are written to Parquet files and queryable before the job finishes.
+The async endpoints implement the [IVOA UWS 1.1](https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html) standard.
+Jobs are queued in Redis and executed by Celery workers. Results are written to Parquet files and queryable before the job finishes.
+Job state in Redis expires `CUTOUTS__ASYNC_TTL` seconds after job creation (default: 1 week).
 
 #### Job Management
 
@@ -105,6 +107,7 @@ The async endpoints implement the [IVOA UWS 1.1](https://www.ivoa.net/documents/
 | `GET`  | `/api/v0/cutouts/async/{job_id}/error`               | Error summary if the job failed; empty 200 otherwise.                                                         |
 | `GET`  | `/api/v0/cutouts/async/{job_id}/owner`               | Job owner ID.                                                                                                 |
 | `GET`  | `/api/v0/cutouts/async/{job_id}/quote`               | Execution time quote (not provided; returns empty string).                                                    |
+| `GET`  | `/api/v0/cutouts/async/{job_id}/destruction`         | Job destruction time.                                                                                         |
 
 #### Submitting an Async Job
 
