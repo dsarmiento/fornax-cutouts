@@ -1,7 +1,14 @@
+from fastapi import Request, Response, status
+
+
 class CutoutJobNotFoundError(Exception):
     def __init__(self, job_id: str):
         self.job_id = job_id
         super().__init__(f"Cutout job {job_id} not found")
+
+
+async def cutout_job_not_found_handler(_request: Request, exc: CutoutJobNotFoundError) -> Response:
+    return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(exc))
 
 
 class CutoutLimitExceededError(Exception):

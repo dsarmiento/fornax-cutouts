@@ -266,6 +266,12 @@ class AsyncRedisCutoutJob:
         self.__redis_client = redis_client
         self.__keys = RedisKeys(job_id)
 
+    async def ensure_exists(self) -> dict:
+        job_json = await self.__redis_client.json().get(self.__keys.uws)
+        if not job_json:
+            raise CutoutJobNotFoundError(self.job_id)
+        return job_json[0]
+
     async def __update_uws(self, path: str, obj: Any):
         await self.__redis_client.json().set(
             name=self.__keys.uws,
@@ -363,11 +369,7 @@ class AsyncRedisCutoutJob:
             await pipe.execute()
 
     async def get_job_summary(self, base_url: str = "") -> JobSummary:
-        job_json: dict | None = await self.__redis_client.json().get(self.__keys.uws)
-
-        if not job_json:
-            raise CutoutJobNotFoundError(self.job_id)
-
+        job_json = await self.ensure_exists()
         job_json.pop("results", None)
         if base_url:
             job_json["parameters"]["position"] = f"{base_url}/parameters/position"
@@ -375,6 +377,7 @@ class AsyncRedisCutoutJob:
         return create_job_summary(**job_json)
 
     async def get_job_result_status(self):
+        await self.ensure_exists()
         async with self.__redis_client.pipeline() as pipe:
             pipe.llen(self.__keys.pending_tasks)
             pipe.get(self.__keys.queued_task_count)
@@ -413,14 +416,13 @@ class AsyncRedisCutoutJob:
         }
 
     async def get_job_parameters(self, position_base_url: str) -> Parameters:
-        job_parameters = await self.__redis_client.json().get(
-            self.__keys.uws,
-            "$.parameters",
-        )
-        job_parameters[0]["position"] = f"{position_base_url}"
+        job_json = await self.ensure_exists()
+        job_parameters = job_json["parameters"]
+        job_parameters["position"] = f"{position_base_url}"
         return create_parameters(**job_parameters[0])
 
     async def get_job_positions(self, page: int = 0, limit: int = 100, base_url: str = "") -> dict:
+        await self.ensure_exists()
         start = page * limit
         end = (page + 1) * limit - 1
         positions = await self.__redis_client.lrange(self.__keys.positions, start, end)

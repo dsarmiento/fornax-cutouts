@@ -11,6 +11,7 @@ from fornax_cutouts.app.discovery import discover_sources
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import async_redis_client_factory, setup_index, sync_redis_client_factory
 from fornax_cutouts.routes.v1 import api_v1
+from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, cutout_job_not_found_handler
 from fornax_cutouts.utils.logging import get_logger, setup_api_logging
 from fornax_cutouts.utils.middleware import RequestLoggingMiddleware
 
@@ -48,6 +49,7 @@ main_app = FastAPI(
 
 # Add structured logging middleware
 main_app.add_middleware(RequestLoggingMiddleware)
+main_app.add_exception_handler(CutoutJobNotFoundError, cutout_job_not_found_handler)
 main_app.include_router(api_v1, prefix="/api/v0")  # Beta routes, eventually will be promoted to v1
 
 
