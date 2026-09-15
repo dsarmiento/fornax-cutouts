@@ -1142,12 +1142,12 @@ class SyncRedisCutoutJob:
         Returns:
             list[dict]: Task descriptor dicts for the batch.
         """
-        batch_tasks = self.__redis_client.lpop(self.__keys.pending_tasks, batch_size)
-        batch_tasks = [json.loads(task_kwargs) for task_kwargs in batch_tasks]
+        batch_tasks = self.__redis_client.lpop(self.__keys.pending_tasks, batch_size) or []
 
         if not batch_tasks:
             raise NoTasksRemainingInBatchError(self.job_id, batch_num)
 
+        batch_tasks = [json.loads(task_kwargs) for task_kwargs in batch_tasks]
         num_descriptors = len(batch_tasks)
 
         self.delete_batch_keys(batch_num)
