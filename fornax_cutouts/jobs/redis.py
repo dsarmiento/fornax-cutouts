@@ -270,7 +270,7 @@ class AsyncRedisCutoutJob:
         job_json = await self.__redis_client.json().get(self.__keys.uws)
         if not job_json:
             raise CutoutJobNotFoundError(self.job_id)
-        return job_json[0]
+        return job_json
 
     async def __update_uws(self, path: str, obj: Any):
         await self.__redis_client.json().set(
@@ -419,7 +419,7 @@ class AsyncRedisCutoutJob:
         job_json = await self.ensure_exists()
         job_parameters = job_json["parameters"]
         job_parameters["position"] = f"{position_base_url}"
-        return create_parameters(**job_parameters[0])
+        return create_parameters(**job_parameters)
 
     async def get_job_positions(self, page: int = 0, limit: int = 100, base_url: str = "") -> dict:
         await self.ensure_exists()
