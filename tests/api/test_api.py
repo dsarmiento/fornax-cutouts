@@ -332,22 +332,24 @@ class TestSync:
         result = MagicMock()
         result.ready.return_value = False
         api.execute_cutout.apply_async.return_value = result
-        with pytest.raises(TimeoutError, match="did not complete"):
+        with pytest.raises(TimeoutError) as exc_info:
             api.client.get(
                 "/api/v0/cutouts/sync/single",
                 params={"filename": _SYNC_FILENAME, "ra": _SYNC_RA, "dec": _SYNC_DEC, "size": _SYNC_SIZE},
             )
+        assert "did not complete" in str(exc_info.value)
 
     def test_single_cutout_task_failure(self, api):
         result = MagicMock()
         result.ready.return_value = True
         result.get.side_effect = RuntimeError("celery failed")
         api.execute_cutout.apply_async.return_value = result
-        with pytest.raises(RuntimeError, match="celery failed"):
+        with pytest.raises(RuntimeError) as exc_info:
             api.client.get(
                 "/api/v0/cutouts/sync/single",
                 params={"filename": _SYNC_FILENAME, "ra": _SYNC_RA, "dec": _SYNC_DEC, "size": _SYNC_SIZE},
             )
+        assert "celery failed" in str(exc_info.value)
 
     def test_single_cutout_enqueues_off_loop(self, api, monkeypatch):
         recorded = _offloaded_funcs(monkeypatch)
