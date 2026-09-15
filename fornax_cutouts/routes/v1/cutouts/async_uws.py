@@ -89,6 +89,11 @@ class CutoutsUWSHandler:
             redirect_url = f"{request.url.path}?{new_query}"
             return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
+        if phase is None:
+            phase = [
+                execution_phase for execution_phase in ExecutionPhase if execution_phase != ExecutionPhase.ARCHIVED
+            ]
+
         jobs = await async_get_uws_jobs(redis_client=self.redis_client, phase=phase, after=after, last=last)
         return XmlResponse(jobs.to_xml())
 

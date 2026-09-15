@@ -209,26 +209,44 @@ def json_dumps_with_encoders(obj: Any) -> str:
     return json.dumps(obj, default=custom_encoders)
 
 
+def _build_uws_jobs_search_query(
+    phases: list[ExecutionPhase],
+    after: datetime | None = None,
+) -> str:
+    query_str = ""
+
+    if phases:
+        phase_filter = " | ".join(phase.value for phase in phases)
+        query_str += f"@phase:{{{phase_filter}}} "
+
+    if not phases or ExecutionPhase.ARCHIVED not in phases:
+        query_str += f"-@phase:{{{ExecutionPhase.ARCHIVED.value}}} "
+
+    if after:
+        query_str += f"@creation_time:[{after.timestamp()} +inf]"
+
+    return query_str
+
+
+def _filter_uws_jobs_by_phase(
+    jobs: list[dict[str, Any]],
+    phases: list[ExecutionPhase],
+) -> list[dict[str, Any]]:
+    if phases:
+        return [job for job in jobs if job and job.get("phase") in phases]
+    return [job for job in jobs if job and job.get("phase") != ExecutionPhase.ARCHIVED]
+
+
 async def async_get_uws_jobs(
     redis_client: AsyncRedisClient | AsyncRedisCluster,
-    phase: ExecutionPhase | None = None,
+    phases: list[ExecutionPhase],
     after: datetime | None = None,
     last: int = 100,
 ) -> Jobs:
     uws_jobs = []
 
     if CONFIG.redis.search_en:
-        query_str = ""
-
-        if phase:
-            query_str += f'@phase:"{phase}" '
-
-        if phase != ExecutionPhase.ARCHIVED:
-            query_str += f'-@phase:"{ExecutionPhase.ARCHIVED}" '
-
-        if after:
-            query_str += f"@creation_time:[{after.timestamp()} +inf]"
-
+        query_str = _build_uws_jobs_search_query(phases, after=after)
         query = Query(query_str).sort_by("creation_time", asc=False).paging(0, last)
 
         results = await redis_client.ft(CUTOUT_INDEX_NAME).search(query)
@@ -249,6 +267,7 @@ async def async_get_uws_jobs(
                 value = await redis_client.json().mget(batch_keys, Path.root_path())
                 uws_jobs.extend(value)
 
+            uws_jobs = _filter_uws_jobs_by_phase(uws_jobs, phases)
             uws_jobs.sort(key=lambda job: job["creation_time"], reverse=True)
             uws_jobs = uws_jobs[:last]
 

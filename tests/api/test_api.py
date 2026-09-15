@@ -619,6 +619,32 @@ class TestAsyncUWS:
         job_ids = [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
         assert job_id in job_ids
 
+    def test_job_list_filters_by_phase(self, api, client):
+        pending = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+        pending_id = _created_job_id(pending)
+
+        executing = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+        executing_id = _created_job_id(executing)
+        api.redis.json().set(RedisKeys(executing_id).uws, "$.phase", ExecutionPhase.EXECUTING)
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "EXECUTING"})
+        assert response.status_code == 200
+        root = _xml(response.text)
+        job_ids = [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
+        assert job_ids == [executing_id]
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "PENDING"})
+        assert response.status_code == 200
+        root = _xml(response.text)
+        job_ids = [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
+        assert job_ids == [pending_id]
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "QUEUED"})
+        assert response.status_code == 200
+        root = _xml(response.text)
+        job_ids = [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
+        assert job_ids == []
+
     def test_invalid_form(self, client):
         response = client.post("/api/v0/cutouts/async", data={"RUNID": "x"}, follow_redirects=False)
         assert response.status_code == 422

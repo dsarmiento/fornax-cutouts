@@ -3,15 +3,61 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 from vo_models.uws.types import ExecutionPhase
 
 from fornax_cutouts.config import CONFIG
-from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, RedisKeys, SyncRedisCutoutJob
+from fornax_cutouts.jobs.redis import (
+    AsyncRedisCutoutJob,
+    RedisKeys,
+    SyncRedisCutoutJob,
+    _build_uws_jobs_search_query,
+    _filter_uws_jobs_by_phase,
+)
 
 _JOB_ID = "abcd1234"
 _POSITIONS = ["10.0, 20.0", "30.0, 40.0"]
+
+
+class TestUWSJobPhaseFiltering:
+    def test_build_search_query_single_phase(self):
+        query = _build_uws_jobs_search_query([ExecutionPhase.QUEUED])
+        assert query == "@phase:{QUEUED} -@phase:{ARCHIVED} "
+
+    def test_build_search_query_multiple_phases(self):
+        query = _build_uws_jobs_search_query([ExecutionPhase.QUEUED, ExecutionPhase.EXECUTING])
+        assert query == "@phase:{QUEUED | EXECUTING} -@phase:{ARCHIVED} "
+
+    def test_build_search_query_archived_only(self):
+        query = _build_uws_jobs_search_query([ExecutionPhase.ARCHIVED])
+        assert query == "@phase:{ARCHIVED} "
+
+    def test_build_search_query_without_phase_excludes_archived(self):
+        query = _build_uws_jobs_search_query([])
+        assert query == "-@phase:{ARCHIVED} "
+
+    def test_build_search_query_with_after(self):
+        after = datetime(2024, 1, 1, tzinfo=UTC)
+        query = _build_uws_jobs_search_query([ExecutionPhase.QUEUED], after=after)
+        assert query.endswith(f"@creation_time:[{after.timestamp()} +inf]")
+
+    def test_filter_jobs_by_single_phase(self):
+        jobs = [
+            {"job_id": "a", "phase": ExecutionPhase.PENDING},
+            {"job_id": "b", "phase": ExecutionPhase.EXECUTING},
+        ]
+        filtered = _filter_uws_jobs_by_phase(jobs, [ExecutionPhase.EXECUTING])
+        assert [job["job_id"] for job in filtered] == ["b"]
+
+    def test_filter_jobs_excludes_archived_by_default(self):
+        jobs = [
+            {"job_id": "a", "phase": ExecutionPhase.PENDING},
+            {"job_id": "b", "phase": ExecutionPhase.ARCHIVED},
+        ]
+        filtered = _filter_uws_jobs_by_phase(jobs, [])
+        assert [job["job_id"] for job in filtered] == ["a"]
 
 
 @pytest.fixture
