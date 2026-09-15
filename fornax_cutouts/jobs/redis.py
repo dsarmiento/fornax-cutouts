@@ -879,6 +879,32 @@ class SyncRedisCutoutJob:
             return []
         return json.loads(raw)
 
+    def batch_result_hexists(self, batch_num: int, increment_id: int) -> bool:
+        """
+        Check if a result exists for a specific task in the batch.
+
+        Args:
+            batch_num (int): Batch identifier within this job.
+            increment_id (int): Task index within the batch.
+
+        Returns:
+            bool: True if a result exists for the provided increment_id in the batch, False otherwise.
+        """
+        return bool(self.__redis_client.hexists(self.__keys.batch_results(batch_num), str(increment_id)))
+
+    def batch_task_was_started(self, batch_num: int, increment_id: int) -> bool:
+        """
+        Check if a task was started in the batch.
+
+        Args:
+            batch_num (int): Batch identifier within this job.
+            increment_id (int): Task index within the batch.
+
+        Returns:
+            bool: True if the task was started in the batch, False otherwise.
+        """
+        return bool(self.__redis_client.hexists(self.__keys.batch_started(batch_num), str(increment_id)))
+
     def get_batch_results(self, batch_num: int) -> list[Any]:
         """
         Return all per-task results collected for a batch.
