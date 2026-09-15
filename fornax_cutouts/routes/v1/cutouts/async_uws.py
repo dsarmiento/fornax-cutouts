@@ -64,9 +64,9 @@ class CutoutsUWSHandler:
     async def get_jobs(
         self,
         request: Request,
-        phase: Annotated[
+        phases: Annotated[
             list[ExecutionPhase] | None,
-            Query(description="The current execution phase to filter jobs by."),
+            Query(description="The current execution phase to filter jobs by.", alias="phase"),
         ] = None,
         after: Annotated[
             UTCTimestamp | None,
@@ -89,12 +89,12 @@ class CutoutsUWSHandler:
             redirect_url = f"{request.url.path}?{new_query}"
             return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
-        if phase is None:
-            phase = [
+        if phases is None:
+            phases = [
                 execution_phase for execution_phase in ExecutionPhase if execution_phase != ExecutionPhase.ARCHIVED
             ]
 
-        jobs = await async_get_uws_jobs(redis_client=self.redis_client, phase=phase, after=after, last=last)
+        jobs = await async_get_uws_jobs(redis_client=self.redis_client, phases=phases, after=after, last=last)
         return XmlResponse(jobs.to_xml())
 
     @uws_router.post(
