@@ -14,7 +14,7 @@ import astrocut
 from astropy.coordinates import SkyCoord
 from celery import Task
 from fsspec import AbstractFileSystem, filesystem
-from vo_models.uws.types import ErrorType, ExecutionPhase
+from vo_models.uws.types import ErrorType
 
 from fornax_cutouts.app.celery_app import celery_app, get_pool_size_for_queue, logger, redis_client_factory
 from fornax_cutouts.auth.limits import CutoutLimiter
@@ -90,6 +90,7 @@ def schedule_job(
     cutout_limit_identity, cutout_limit_max, cutout_limit_window_seconds = r.get_cutout_limit_budget()
     logger.debug(f"Cutout limit identity: {cutout_limit_identity} limit: {cutout_limit_max}")
 
+    r.queue_job()
     job_parameters = r.get_job_parameters()
     size = job_parameters.pop("size")
     generate_science = job_parameters.pop("generate_science", True)
@@ -110,7 +111,6 @@ def schedule_job(
         },
     )
 
-    r.update_job_phase(ExecutionPhase.QUEUED)
     redis_update_time = time.perf_counter()
 
     validated_params = cutout_registry.validate_mission_params(mission_params=mission_params, size=size)
@@ -263,32 +263,21 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
     pool_size = get_pool_size_for_queue("cutouts")
     batch_size = pool_size * CONFIG.worker.batch_size_per_worker
 
-    descriptors = r.pop_pending_tasks(batch_size)
-    pop_pending_tasks_time = time.perf_counter()
-
-    if not descriptors:
-        return
-
-    r.decrement_total_pending_tasks(len(descriptors))
-    r.increment_queued_task_count(len(descriptors))
-    increment_queued_task_count_time = time.perf_counter()
-
-    r.delete_batch_keys(batch_num)
-    r.set_batch_descriptors(batch_num, descriptors)
-    r.set_batch_outstanding(batch_num, len(descriptors))
+    batch_tasks = r.prepare_batch(batch_num, batch_size)
+    prepare_batch_time = time.perf_counter()
 
     eta = datetime.now(tz=timezone.utc) + timedelta(minutes=CONFIG.worker.batch_watchdog_timeout_minutes)
     batch_watchdog.apply_async(
         kwargs={
             "job_id": job_id,
             "batch_num": batch_num,
-            "expected_count": len(descriptors),
+            "expected_count": len(batch_tasks),
         },
         eta=eta,
         task_id=BATCH_WATCHDOG_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
     )
 
-    for increment_id, desc in enumerate(descriptors):
+    for increment_id, desc in enumerate(batch_tasks):
         target = TargetPosition(ra=desc["target"][0], dec=desc["target"][1])
         execute_cutout.apply_async(
             kwargs={
@@ -313,14 +302,14 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
     dispatch_time = time.perf_counter()
 
     logger.info(
-        f"Job {job_id} batch {batch_num}: dispatched {len(descriptors)} cutout(s)",
+        f"Job {job_id} batch {batch_num}: dispatched {len(batch_tasks)} cutout(s)",
         extra={
             "event": "batch_dispatched",
             "job_id": job_id,
             "batch_num": batch_num,
             "pool_size": pool_size,
             "batch_size": batch_size,
-            "num_cutouts": len(descriptors),
+            "num_cutouts": len(batch_tasks),
             "total_s": round(dispatch_time - start_time, 4),
         },
     )
@@ -331,9 +320,8 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
             "job_id": job_id,
             "batch_num": batch_num,
             "timings_s": {
-                "pop_pending_tasks": round(pop_pending_tasks_time - start_time, 4),
-                "increment_queued_count": round(increment_queued_task_count_time - pop_pending_tasks_time, 4),
-                "dispatch_cutouts": round(dispatch_time - increment_queued_task_count_time, 4),
+                "prepare_batch": round(prepare_batch_time - start_time, 4),
+                "dispatch_cutouts": round(dispatch_time - prepare_batch_time, 4),
                 "total": round(dispatch_time - start_time, 4),
             },
         },
