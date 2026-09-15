@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from vo_models.uws.types import ExecutionPhase
 
@@ -79,7 +81,7 @@ class TestSyncRedisCutoutJobTTL:
     def test_batch_keys_ttl(self, sync_redis, job_id):
         job = SyncRedisCutoutJob(redis_client=sync_redis, job_id=job_id)
         keys = RedisKeys(job_id)
-        job.set_batch_outstanding(1, 5)
-        job.set_batch_descriptors(1, [{"x": 1}])
+        sync_redis.rpush(keys.pending_tasks, json.dumps({"job_id": job_id, "source_file": "x.fits"}))
+        job.prepare_batch(1, 1)
         for key in (keys.batch_outstanding(1), keys.batch_descriptors(1)):
             assert 0 < sync_redis.ttl(key) <= CONFIG.async_ttl
