@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,7 @@ import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 from vo_models.uws.types import ExecutionPhase
+from vo_models.voresource.types import UTCTimestamp
 
 from fornax_cutouts.app.api import main_app
 from fornax_cutouts.config import CONFIG
@@ -95,6 +97,10 @@ def _xml_text(root, tag):
 
 def _xml_local(tag):
     return tag.split("}")[-1]
+
+
+def _job_ids_from_list(root):
+    return [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
 
 
 def _result_hrefs(root):
@@ -548,8 +554,23 @@ class TestRequestFormats:
             follow_redirects=False,
         )
         assert response.status_code == 303
-        job = _job_uws(api.redis, _created_job_id(response))
+        job_id = _created_job_id(response)
+        job = _job_uws(api.redis, job_id)
         assert job["parameters"]["fake_source"] == {}
+
+        status_response = api.client.get(f"/api/v0/cutouts/async/{job_id}")
+        assert status_response.status_code == 200
+        params = _params_by_id(_xml(status_response.text))
+        assert None in params["fake_source"]
+
+    def test_missing_mission_is_rejected(self, api):
+        response = api.client.post(
+            "/api/v0/cutouts/async",
+            data={"position": ["m101"], "size": "4"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "At least one mission must be specified"
 
     def test_extra_filename_params_are_forwarded(self, api):
         response = api.client.post(
@@ -606,7 +627,7 @@ class TestAsyncUWS:
         assert "xml" in response.headers["content-type"]
         root = _xml(response.text)
         assert _xml_local(root.tag) == "jobs"
-        assert [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"] == []
+        assert _job_ids_from_list(root) == []
 
     def test_job_list_includes_created_job(self, client):
         created = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
@@ -614,8 +635,51 @@ class TestAsyncUWS:
         response = client.get("/api/v0/cutouts/async", params={"last": 100})
         assert response.status_code == 200
         root = _xml(response.text)
-        job_ids = [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
-        assert job_id in job_ids
+        assert job_id in _job_ids_from_list(root)
+
+    def test_job_list_excludes_archived_unless_requested(self, api, client):
+        active = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+        active_id = _created_job_id(active)
+
+        archived = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+        archived_id = _created_job_id(archived)
+        api.redis.json().set(RedisKeys(archived_id).uws, "$.phase", ExecutionPhase.ARCHIVED)
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100})
+        assert response.status_code == 200
+        job_ids = _job_ids_from_list(_xml(response.text))
+        assert active_id in job_ids
+        assert archived_id not in job_ids
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "ARCHIVED"})
+        assert response.status_code == 200
+        job_ids = _job_ids_from_list(_xml(response.text))
+        assert job_ids == [archived_id]
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "PENDING"})
+        assert response.status_code == 200
+        job_ids = _job_ids_from_list(_xml(response.text))
+        assert job_ids == [active_id]
+
+    def test_job_list_filters_by_phase(self, api, client):
+        pending = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+        pending_id = _created_job_id(pending)
+
+        executing = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+        executing_id = _created_job_id(executing)
+        api.redis.json().set(RedisKeys(executing_id).uws, "$.phase", ExecutionPhase.EXECUTING)
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "EXECUTING"})
+        assert response.status_code == 200
+        assert _job_ids_from_list(_xml(response.text)) == [executing_id]
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "PENDING"})
+        assert response.status_code == 200
+        assert _job_ids_from_list(_xml(response.text)) == [pending_id]
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "QUEUED"})
+        assert response.status_code == 200
+        assert _job_ids_from_list(_xml(response.text)) == []
 
     def test_invalid_form(self, client):
         response = client.post("/api/v0/cutouts/async", data={"RUNID": "x"}, follow_redirects=False)
@@ -681,7 +745,12 @@ class TestJobSpecific:
 
     def test_destruction(self, client, job_id):
         response = client.get(f"/api/v0/cutouts/async/{job_id}/destruction")
-        assert response.status_code == 501
+        assert response.status_code == 200
+        destruction = response.json()
+        assert isinstance(destruction, str)
+        destruction_ts = UTCTimestamp.fromisoformat(destruction).timestamp()
+        now = time.time()
+        assert CONFIG.async_ttl - 60 <= destruction_ts - now <= CONFIG.async_ttl + 60
 
     def test_error(self, client, job_id):
         response = client.get(f"/api/v0/cutouts/async/{job_id}/error")

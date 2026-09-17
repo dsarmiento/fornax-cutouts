@@ -21,7 +21,7 @@ from fornax_cutouts.jobs.redis import AsyncRedisCutoutJob, async_get_uws_jobs, a
 from fornax_cutouts.jobs.results import render_cutout_results
 from fornax_cutouts.jobs.tasks import enqueue_task, schedule_job
 from fornax_cutouts.models.metadata import MultiMissionCutoutRequest
-from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, CutoutLimitExceededError
+from fornax_cutouts.utils.exceptions import CutoutLimitExceededError
 from fornax_cutouts.utils.form_data import _filename_params, form_parser
 from fornax_cutouts.utils.html_link import html_link
 from fornax_cutouts.utils.logging import get_logger
@@ -64,9 +64,9 @@ class CutoutsUWSHandler:
     async def get_jobs(
         self,
         request: Request,
-        phase: Annotated[
+        phases: Annotated[
             list[ExecutionPhase] | None,
-            Query(description="The current execution phase to filter jobs by."),
+            Query(description="The current execution phase to filter jobs by.", alias="phase"),
         ] = None,
         after: Annotated[
             UTCTimestamp | None,
@@ -89,7 +89,12 @@ class CutoutsUWSHandler:
             redirect_url = f"{request.url.path}?{new_query}"
             return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
-        jobs = await async_get_uws_jobs(redis_client=self.redis_client, phase=phase, after=after, last=last)
+        if phases is None:
+            phases = [
+                execution_phase for execution_phase in ExecutionPhase if execution_phase != ExecutionPhase.ARCHIVED
+            ]
+
+        jobs = await async_get_uws_jobs(redis_client=self.redis_client, phases=phases, after=after, last=last)
         return XmlResponse(jobs.to_xml())
 
     @uws_router.post(
@@ -109,6 +114,11 @@ class CutoutsUWSHandler:
         generate_preview = multimission_request.generate_preview
         run_id = multimission_request.run_id
         mission_params = {name: _filename_params(v) for name, v in multimission_request.missions.items()}
+        if not mission_params:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="At least one mission must be specified",
+            )
         request_params = {
             "position": position,
             "size": size,
@@ -177,16 +187,9 @@ class CutoutsUWSHandler:
             Path(description="Server-assigned job ID for the request"),
         ],
     ) -> JobSummary:
-        try:
-            uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
-            job_summary = await uws_job.get_job_summary(base_url=request.url)
-            return XmlResponse(job_summary.to_xml())
-
-        except CutoutJobNotFoundError as e:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(e),
-            )
+        uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
+        job_summary = await uws_job.get_job_summary(base_url=request.url)
+        return XmlResponse(job_summary.to_xml())
 
     @uws_router.delete(
         "/async/{job_id}",
@@ -276,9 +279,9 @@ class CutoutsUWSHandler:
     @uws_router.get(
         "/async/{job_id}/destruction",
         summary="Get destruction time",
-        description=f"Returns proposed job destruction time. Currently returns 501 Not Implemented.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
+        description=("Returns the job destruction time.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}"),
     )
-    def get_job_destruction(
+    async def get_job_destruction(
         self,
         job_id: Annotated[
             str,
@@ -289,7 +292,9 @@ class CutoutsUWSHandler:
         Return job details per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
-        return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED, content="Not implemented")
+        uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
+        job_summary = await uws_job.get_job_summary()
+        return job_summary.destruction
 
     @uws_router.post(
         "/async/{job_id}/destruction",
@@ -374,6 +379,8 @@ class CutoutsUWSHandler:
         Return job details per UWS spec
         https://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.html#RESTbinding
         """
+        uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
+        await uws_job.ensure_exists()
         results = Results(
             results=[
                 ResultReference(
@@ -452,6 +459,9 @@ class CutoutsUWSHandler:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid output format: {output_format}",
             )
+
+        uws_job = AsyncRedisCutoutJob(redis_client=self.redis_client, job_id=job_id)
+        await uws_job.ensure_exists()
 
         # render_cutout_results does sync DuckDB/S3 parquet reads, pandas, and VOTable XML
         payload = await asyncio.to_thread(render_cutout_results, job_id, output_format, page, limit, str(request.url))
