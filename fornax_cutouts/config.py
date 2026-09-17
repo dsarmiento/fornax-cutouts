@@ -48,6 +48,7 @@ class WorkerConfig(BaseModel):
 
 class StorageConfig(BaseModel):
     prefix: str = "/tmp"
+    return_signed_urls: bool = False
 
     @property
     def is_s3(self):
