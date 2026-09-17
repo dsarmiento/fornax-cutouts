@@ -23,6 +23,9 @@ def create_parameters(**kwargs) -> Parameters | None:
             by_reference = True
 
         if isinstance(value, dict):
+            if not value:
+                fields[name] = create_parameter(name=name, value=None)
+                continue
             for sub_name, sub_value in value.items():
                 param_name = f"{name}.{sub_name}"
                 fields[param_name] = create_parameter(name=param_name, value=sub_value, by_reference=by_reference)

@@ -554,8 +554,23 @@ class TestRequestFormats:
             follow_redirects=False,
         )
         assert response.status_code == 303
-        job = _job_uws(api.redis, _created_job_id(response))
+        job_id = _created_job_id(response)
+        job = _job_uws(api.redis, job_id)
         assert job["parameters"]["fake_source"] == {}
+
+        status_response = api.client.get(f"/api/v0/cutouts/async/{job_id}")
+        assert status_response.status_code == 200
+        params = _params_by_id(_xml(status_response.text))
+        assert None in params["fake_source"]
+
+    def test_missing_mission_is_rejected(self, api):
+        response = api.client.post(
+            "/api/v0/cutouts/async",
+            data={"position": ["m101"], "size": "4"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "At least one mission must be specified"
 
     def test_extra_filename_params_are_forwarded(self, api):
         response = api.client.post(
