@@ -99,6 +99,10 @@ def _xml_local(tag):
     return tag.split("}")[-1]
 
 
+def _job_ids_from_list(root):
+    return [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
+
+
 def _result_hrefs(root):
     return {
         element.get("id"): element.get(_XLINK_HREF) or element.get("href")
@@ -608,7 +612,7 @@ class TestAsyncUWS:
         assert "xml" in response.headers["content-type"]
         root = _xml(response.text)
         assert _xml_local(root.tag) == "jobs"
-        assert [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"] == []
+        assert _job_ids_from_list(root) == []
 
     def test_job_list_includes_created_job(self, client):
         created = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
@@ -616,8 +620,31 @@ class TestAsyncUWS:
         response = client.get("/api/v0/cutouts/async", params={"last": 100})
         assert response.status_code == 200
         root = _xml(response.text)
-        job_ids = [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
-        assert job_id in job_ids
+        assert job_id in _job_ids_from_list(root)
+
+    def test_job_list_excludes_archived_unless_requested(self, api, client):
+        active = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+        active_id = _created_job_id(active)
+
+        archived = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+        archived_id = _created_job_id(archived)
+        api.redis.json().set(RedisKeys(archived_id).uws, "$.phase", ExecutionPhase.ARCHIVED)
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100})
+        assert response.status_code == 200
+        job_ids = _job_ids_from_list(_xml(response.text))
+        assert active_id in job_ids
+        assert archived_id not in job_ids
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "ARCHIVED"})
+        assert response.status_code == 200
+        job_ids = _job_ids_from_list(_xml(response.text))
+        assert job_ids == [archived_id]
+
+        response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "PENDING"})
+        assert response.status_code == 200
+        job_ids = _job_ids_from_list(_xml(response.text))
+        assert job_ids == [active_id]
 
     def test_job_list_filters_by_phase(self, api, client):
         pending = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
@@ -629,21 +656,15 @@ class TestAsyncUWS:
 
         response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "EXECUTING"})
         assert response.status_code == 200
-        root = _xml(response.text)
-        job_ids = [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
-        assert job_ids == [executing_id]
+        assert _job_ids_from_list(_xml(response.text)) == [executing_id]
 
         response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "PENDING"})
         assert response.status_code == 200
-        root = _xml(response.text)
-        job_ids = [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
-        assert job_ids == [pending_id]
+        assert _job_ids_from_list(_xml(response.text)) == [pending_id]
 
         response = client.get("/api/v0/cutouts/async", params={"last": 100, "phase": "QUEUED"})
         assert response.status_code == 200
-        root = _xml(response.text)
-        job_ids = [element.get("id") for element in root.iter() if _xml_local(element.tag) == "jobref"]
-        assert job_ids == []
+        assert _job_ids_from_list(_xml(response.text)) == []
 
     def test_invalid_form(self, client):
         response = client.post("/api/v0/cutouts/async", data={"RUNID": "x"}, follow_redirects=False)
