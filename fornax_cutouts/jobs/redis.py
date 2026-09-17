@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Generator
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from redis import Redis as SyncRedisClient
@@ -17,6 +17,7 @@ from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, Parameters, ShortJobDescription
 from vo_models.uws.types import ErrorType
+from vo_models.voresource.types import UTCTimestamp
 
 from fornax_cutouts.auth.registry import _UNKNOWN_CLIENT_BUCKET
 from fornax_cutouts.config import CONFIG
@@ -198,12 +199,14 @@ def setup_index(redis_client: SyncRedisClient | SyncRedisCluster):
 
 def json_dumps_with_encoders(obj: Any) -> str:
     """
-    JSON dumps with datetime serialization support.
+    JSON dumps with UTCTimestamp serialization support.
     """
 
     def custom_encoders(o: Any) -> Any:
         if isinstance(o, datetime):
-            return o.isoformat(timespec="seconds").replace("+00:00", "Z")
+            return UTCTimestamp(o).isoformat()
+        if isinstance(o, UTCTimestamp):
+            return o.isoformat()
         raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
 
     return json.dumps(obj, default=custom_encoders)
@@ -211,7 +214,7 @@ def json_dumps_with_encoders(obj: Any) -> str:
 
 def _build_uws_jobs_search_query(
     phases: list[ExecutionPhase],
-    after: datetime | None = None,
+    after: UTCTimestamp | None = None,
 ) -> str:
     query_str = ""
 
@@ -326,54 +329,54 @@ class AsyncRedisCutoutJob:
             obj=obj,
         )
 
-    async def __set_time(self, time_field: str, time: datetime | None = None) -> datetime:
+    async def __set_time(self, time_field: str, time: UTCTimestamp | None = None) -> UTCTimestamp:
         """
         Set a UWS timestamp field as a Unix timestamp for efficient Redis date filtering.
 
         Args:
             time_field (str): UWS field name to set (e.g. ``creation_time``).
-            time (datetime, optional): Time to store. Defaults to ``datetime.now()``.
+            time (UTCTimestamp, optional): Time to store. Defaults to ``UTCTimestamp.now(timezone.utc)``.
 
         Returns:
-            datetime: The time that was written.
+            UTCTimestamp: The time that was written.
         """
         if time is None:
-            time = datetime.now()
+            time = UTCTimestamp.now(timezone.utc)
 
         await self.__update_uws(path=f"$.{time_field}", obj=time.timestamp())
 
         return time
 
-    async def __set_create_time(self) -> datetime:
+    async def __set_create_time(self) -> UTCTimestamp:
         """
         Set the UWS ``creation_time`` to the current time.
 
         Returns:
-            datetime: The time that was written.
+            UTCTimestamp: The time that was written.
         """
         return await self.__set_time(time_field="creation_time")
 
-    async def __set_quote(self, quote: datetime) -> datetime:
+    async def __set_quote(self, quote: UTCTimestamp) -> UTCTimestamp:
         """
         Set the UWS ``quote`` (estimated completion) timestamp.
 
         Args:
-            quote (datetime): Estimated completion time.
+            quote (UTCTimestamp): Estimated completion time.
 
         Returns:
-            datetime: The time that was written.
+            UTCTimestamp: The time that was written.
         """
         return await self.__set_time(time_field="quote", time=quote)
 
-    async def __set_destruction(self, destruction: datetime) -> datetime:
+    async def __set_destruction(self, destruction: UTCTimestamp) -> UTCTimestamp:
         """
         Set the UWS ``destruction`` (TTL expiry) timestamp.
 
         Args:
-            destruction (datetime): Job destruction / key-expiry time.
+            destruction (UTCTimestamp): Job destruction / key-expiry time.
 
         Returns:
-            datetime: The time that was written.
+            UTCTimestamp: The time that was written.
         """
         return await self.__set_time(time_field="destruction", time=destruction)
 
@@ -599,7 +602,7 @@ class SyncRedisCutoutJob:
                 if creation and creation[0] is not None:
                     self.__destruction_ts = float(creation[0]) + CONFIG.async_ttl
                 else:
-                    self.__destruction_ts = datetime.now().timestamp() + CONFIG.async_ttl
+                    self.__destruction_ts = UTCTimestamp.now(timezone.utc).timestamp() + CONFIG.async_ttl
         return self.__destruction_ts
 
     def __expire(self, pipe, *keys: str) -> None:
@@ -628,16 +631,16 @@ class SyncRedisCutoutJob:
             obj=obj,
         )
 
-    def __set_time(self, time_field: str, time: datetime | None = None):
+    def __set_time(self, time_field: str, time: UTCTimestamp | None = None):
         """
         Set a UWS timestamp field as a Unix timestamp for efficient Redis date filtering.
 
         Args:
             time_field (str): UWS field name to set (e.g. ``start_time``).
-            time (datetime, optional): Time to store. Defaults to ``datetime.now()``.
+            time (UTCTimestamp, optional): Time to store. Defaults to ``UTCTimestamp.now(timezone.utc)``.
         """
         if time is None:
-            time = datetime.now()
+            time = UTCTimestamp.now(timezone.utc)
 
         self.__update_uws(path=f"$.{time_field}", obj=time.timestamp())
 

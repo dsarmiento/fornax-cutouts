@@ -4,7 +4,7 @@ import time
 from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Sequence, cast
@@ -15,6 +15,7 @@ from astropy.coordinates import SkyCoord
 from celery import Task
 from fsspec import AbstractFileSystem, filesystem
 from vo_models.uws.types import ErrorType
+from vo_models.voresource.types import UTCTimestamp
 
 from fornax_cutouts.app.celery_app import celery_app, get_pool_size_for_queue, logger, redis_client_factory
 from fornax_cutouts.auth.limits import CutoutLimiter
@@ -278,7 +279,7 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
 
     prepare_batch_time = time.perf_counter()
 
-    eta = datetime.now(tz=timezone.utc) + timedelta(minutes=CONFIG.worker.batch_watchdog_timeout_minutes)
+    eta = UTCTimestamp.now(timezone.utc) + timedelta(minutes=CONFIG.worker.batch_watchdog_timeout_minutes)
     batch_watchdog.apply_async(
         kwargs={
             "job_id": job_id,

@@ -4,7 +4,6 @@ import asyncio
 import json
 import time
 from collections.abc import Callable
-from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from xml.etree import ElementTree as ET
@@ -13,6 +12,7 @@ import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 from vo_models.uws.types import ExecutionPhase
+from vo_models.voresource.types import UTCTimestamp
 
 from fornax_cutouts.app.api import main_app
 from fornax_cutouts.config import CONFIG
@@ -733,7 +733,7 @@ class TestJobSpecific:
         assert response.status_code == 200
         destruction = response.json()
         assert isinstance(destruction, str)
-        destruction_ts = datetime.fromisoformat(destruction.replace("Z", "+00:00")).timestamp()
+        destruction_ts = UTCTimestamp.fromisoformat(destruction).timestamp()
         now = time.time()
         assert CONFIG.async_ttl - 60 <= destruction_ts - now <= CONFIG.async_ttl + 60
 

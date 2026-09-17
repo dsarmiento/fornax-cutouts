@@ -1,11 +1,12 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request, Response, status
 from redis.asyncio import Redis, RedisCluster
 from redis.exceptions import ConnectionError as RedisConnectionError
+from vo_models.voresource.types import UTCTimestamp
 
 from fornax_cutouts.app.discovery import discover_sources
 from fornax_cutouts.config import CONFIG
@@ -67,7 +68,7 @@ async def health_check(redis_client: Annotated[Redis | RedisCluster, Depends(asy
     health_response = {
         "status": "ok",
         "details": "",
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "timestamp": UTCTimestamp.now(timezone.utc).isoformat(),
     }
 
     try:
