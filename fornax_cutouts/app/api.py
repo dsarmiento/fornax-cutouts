@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, Response, status
 from redis.asyncio import Redis, RedisCluster
 from redis.exceptions import ConnectionError as RedisConnectionError
 
@@ -11,7 +11,7 @@ from fornax_cutouts.app.discovery import discover_sources
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import async_redis_client_factory, setup_index, sync_redis_client_factory
 from fornax_cutouts.routes.v1 import api_v1
-from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, cutout_job_not_found_handler
+from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError
 from fornax_cutouts.utils.logging import get_logger, setup_api_logging
 from fornax_cutouts.utils.middleware import RequestLoggingMiddleware
 
@@ -49,8 +49,12 @@ main_app = FastAPI(
 
 # Add structured logging middleware
 main_app.add_middleware(RequestLoggingMiddleware)
-main_app.add_exception_handler(CutoutJobNotFoundError, cutout_job_not_found_handler)
 main_app.include_router(api_v1, prefix="/api/v0")  # Beta routes, eventually will be promoted to v1
+
+
+@main_app.exception_handler(CutoutJobNotFoundError)
+async def cutout_job_not_found_handler(_request: Request, exc: CutoutJobNotFoundError) -> Response:
+    return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(exc))
 
 
 @main_app.get(

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-import pytest
 from vo_models.uws.types import ExecutionPhase
 
 from fornax_cutouts.config import CONFIG
@@ -16,6 +15,7 @@ from fornax_cutouts.jobs.redis import (
     _build_uws_jobs_search_query,
     _filter_uws_jobs_by_phase,
 )
+from tests.jobs.helpers import descriptor
 
 _JOB_ID = "abcd1234"
 _POSITIONS = ["10.0, 20.0", "30.0, 40.0"]
@@ -58,16 +58,6 @@ class TestUWSJobPhaseFiltering:
         ]
         filtered = _filter_uws_jobs_by_phase(jobs, [])
         assert [job["job_id"] for job in filtered] == ["a"]
-
-
-@pytest.fixture
-async def job_id(async_redis):
-    job = AsyncRedisCutoutJob(redis_client=async_redis, job_id=_JOB_ID)
-    await job.create_job(
-        run_id="test-run-id",
-        parameters={"position": _POSITIONS, "size": 256},
-    )
-    return _JOB_ID
 
 
 class TestAsyncJobTTL:
@@ -131,3 +121,52 @@ class TestSyncRedisCutoutJobTTL:
         job.prepare_batch(1, 1)
         for key in (keys.batch_outstanding(1), keys.batch_descriptors(1)):
             assert 0 < sync_redis.ttl(key) <= CONFIG.async_ttl
+
+
+def _prepare_batch(sync_redis, job_id: str, num_tasks: int) -> SyncRedisCutoutJob:
+    job = SyncRedisCutoutJob(redis_client=sync_redis, job_id=job_id)
+    job.push_pending_tasks([descriptor(job_id, f"{chr(ord('a') + i)}.fits") for i in range(num_tasks)])
+    job.prepare_batch(1, num_tasks)
+    return job
+
+
+class TestSyncRedisCutoutJobTaskOperations:
+    def test_skip_task_updates_counters_and_result(self, sync_redis, job_id):
+        job = _prepare_batch(sync_redis, job_id, 2)
+        keys = RedisKeys(job_id)
+        job.start_task(1, 0)
+
+        remaining = job.skip_task(1, 0)
+
+        assert remaining == 1
+        assert sync_redis.hget(keys.batch_results(1), "0") == "null"
+        assert int(sync_redis.get(keys.skipped_task_count)) == 1
+        assert int(sync_redis.get(keys.executing_task_count)) == 0
+        assert job.get_batch_outstanding(1) == 1
+        assert job.get_batch_results(1) == [None]
+
+    def test_skip_task_returns_zero_for_last_task(self, sync_redis, job_id):
+        job = _prepare_batch(sync_redis, job_id, 1)
+        job.start_task(1, 0)
+
+        remaining = job.skip_task(1, 0)
+
+        assert remaining == 0
+        assert job.get_batch_outstanding(1) == 0
+
+    def test_fail_task_records_failure_and_updates_counters(self, sync_redis, job_id):
+        job = _prepare_batch(sync_redis, job_id, 2)
+        keys = RedisKeys(job_id)
+        job.start_task(1, 0)
+        task_kwargs = descriptor(job_id, "a.fits")
+
+        remaining = job.fail_task(1, 0, task_kwargs, "cutout failed")
+
+        assert remaining == 1
+        assert task_kwargs["error_message"] == "cutout failed"
+        assert sync_redis.hget(keys.batch_results(1), "0") == "null"
+        assert int(sync_redis.get(keys.executing_task_count)) == 0
+        assert job.get_batch_outstanding(1) == 1
+        failed = json.loads(sync_redis.lrange(keys.failed_tasks, 0, -1)[0])
+        assert failed["source_file"] == "a.fits"
+        assert failed["error_message"] == "cutout failed"

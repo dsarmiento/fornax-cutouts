@@ -757,7 +757,7 @@ class SyncRedisCutoutJob:
         with self.__redis_client.pipeline() as pipe:
             pipe.llen(self.__keys.pending_tasks)
             pipe.delete(self.__keys.pending_tasks)
-            count, _ = pipe.execute()
+            count = pipe.execute()[0]
 
         return count
 
@@ -954,7 +954,7 @@ class SyncRedisCutoutJob:
             pipe.decr(self.__keys.executing_task_count)
             pipe.incr(self.__keys.skipped_task_count)
             self.__expire(pipe, self.__keys.batch_results(batch_num), self.__keys.skipped_task_count)
-            _, remaining, _, _, _ = pipe.execute()
+            remaining = pipe.execute()[1]
         return int(remaining) if remaining else 0
 
     def fail_task(self, batch_num: int, increment_id: int, task_kwargs: dict, error_message: str) -> int:
@@ -978,7 +978,7 @@ class SyncRedisCutoutJob:
             pipe.decr(self.__keys.executing_task_count)
             pipe.rpush(self.__keys.failed_tasks, json_dumps_with_encoders(task_kwargs))
             self.__expire(pipe, self.__keys.batch_results(batch_num), self.__keys.failed_tasks)
-            _, remaining, _, _, _ = pipe.execute()
+            remaining = pipe.execute()[1]
         return int(remaining) if remaining else 0
 
     def complete_task(self, batch_num: int, increment_id: int, result_json: str) -> int:
@@ -999,7 +999,7 @@ class SyncRedisCutoutJob:
             pipe.decr(self.__keys.executing_task_count)
             pipe.incr(self.__keys.completed_task_count)
             self.__expire(pipe, self.__keys.batch_results(batch_num))
-            _, remaining, _, _, _ = pipe.execute()
+            remaining = pipe.execute()[1]
         return int(remaining) if remaining else 0
 
     # Job operations
