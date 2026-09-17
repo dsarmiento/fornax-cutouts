@@ -21,7 +21,7 @@ from vo_models.uws.types import ErrorType
 from fornax_cutouts.auth.registry import _UNKNOWN_CLIENT_BUCKET
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.uws import create_job_summary, create_parameters
-from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, NoTasksRemainingInBatchError
+from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, NoTasksRemainingInJobError
 from fornax_cutouts.utils.pagination import get_pagination_metadata
 
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
@@ -1145,7 +1145,8 @@ class SyncRedisCutoutJob:
         batch_tasks = self.__redis_client.lpop(self.__keys.pending_tasks, batch_size) or []
 
         if not batch_tasks:
-            raise NoTasksRemainingInBatchError(self.job_id, batch_num)
+            self.delete_batch_keys(batch_num)
+            raise NoTasksRemainingInJobError(self.job_id)
 
         batch_tasks = [json.loads(task_kwargs) for task_kwargs in batch_tasks]
         num_descriptors = len(batch_tasks)

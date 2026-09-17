@@ -28,3 +28,9 @@ class NoTasksRemainingInBatchError(Exception):
         self.job_id = job_id
         self.batch_num = batch_num
         super().__init__(f"No cutout tasks remaining in {job_id} batch {batch_num}")
+
+
+class NoTasksRemainingInJobError(Exception):
+    def __init__(self, job_id: str):
+        self.job_id = job_id
+        super().__init__(f"No cutout tasks remaining in {job_id}")

@@ -24,7 +24,7 @@ from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse
 from fornax_cutouts.sources import cutout_registry
-from fornax_cutouts.utils.exceptions import CutoutLimitExceededError
+from fornax_cutouts.utils.exceptions import CutoutLimitExceededError, NoTasksRemainingInJobError
 from fornax_cutouts.utils.santa_resolver import resolve_positions
 
 STRETCH = "asinh"  # "sinh"
@@ -263,7 +263,19 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
     pool_size = get_pool_size_for_queue("cutouts")
     batch_size = pool_size * CONFIG.worker.batch_size_per_worker
 
-    batch_tasks = r.prepare_batch(batch_num, batch_size)
+    try:
+        batch_tasks = r.prepare_batch(batch_num, batch_size)
+    except NoTasksRemainingInJobError:
+        r.complete_job()
+        logger.info(
+            f"Job {job_id} completed: no tasks remaining",
+            extra={
+                "event": "job_completed",
+                "job_id": job_id,
+            },
+        )
+        return
+
     prepare_batch_time = time.perf_counter()
 
     eta = datetime.now(tz=timezone.utc) + timedelta(minutes=CONFIG.worker.batch_watchdog_timeout_minutes)
@@ -414,6 +426,7 @@ def write_results(self: Task, job_id: str, batch_num: int):
         total_completed = completed_tasks + failed_tasks + skipped_tasks
         job_complete = total_completed == expected_total and pending_tasks == 0
         next_batch = -1
+
         if job_complete:
             r.complete_job()
 
