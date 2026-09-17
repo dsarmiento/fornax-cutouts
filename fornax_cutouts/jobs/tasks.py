@@ -726,7 +726,7 @@ def get_cutout_stem(cutout_file: str, extensions: Sequence[str]) -> str:
     return cutout_file
 
 
-def generate_cutout(
+def generate_cutout(  # noqa: C901
     source_file: str,
     target: TargetPosition,
     size: tuple[int, int],
@@ -735,7 +735,7 @@ def generate_cutout(
     generate_preview: bool = False,
     mission: str = "sync_cutout",
     metadata: dict = {},
-    job_id: str = "",
+    job_id: str = "sync",
 ) -> CutoutResponse:
     """
     Execute a cutout within the specific source file
@@ -753,6 +753,8 @@ def generate_cutout(
             Defaults to "sync_cutout".
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to {}.
+        job_id (str, optional): The job ID to generate the cutout for.
+            Defaults to "sync".
     """
     mission = _resolve_mission(source_file, mission)
     start_time = time.perf_counter()
@@ -805,12 +807,18 @@ def generate_cutout(
             science_bytes = Path(cutout_fname).stat().st_size
             dest_fname = cutout_fname.replace(temp_output_dir, output_dir)
             fs.put(lpath=cutout_fname, rpath=dest_fname)
+            if CONFIG.storage.is_s3 and CONFIG.storage.return_signed_urls:
+                dest_fname = fs.sign(dest_fname, expiration=CONFIG.sync_ttl if job_id == "sync" else CONFIG.async_ttl)
             cutout_fname = dest_fname
 
         if img_fname:
             preview_bytes = Path(img_fname).stat().st_size
             img_dest_fname = img_fname.replace(temp_output_dir, output_dir)
             fs.put(lpath=img_fname, rpath=img_dest_fname)
+            if CONFIG.storage.is_s3 and CONFIG.storage.return_signed_urls:
+                img_dest_fname = fs.sign(
+                    img_dest_fname, expiration=CONFIG.sync_ttl if job_id == "sync" else CONFIG.async_ttl
+                )
             img_fname = img_dest_fname
 
         upload_time = time.perf_counter()
@@ -855,6 +863,7 @@ def generate_cutout(
             "bytes": cutout_bytes,
             "total_s": timings_s["total"],
             "output_formats": output_formats,
+            "is_signed_url": CONFIG.storage.is_s3 and CONFIG.storage.return_signed_urls,
         },
     )
     logger.debug(
