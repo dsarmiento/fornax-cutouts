@@ -29,12 +29,15 @@ def _get_s3_fs() -> AbstractFileSystem:
 
 
 def _public_cutout_urls(ret: CutoutResponse) -> CutoutResponse:
-    """Publicly sign cutout URLs for S3 storage."""
+    """
+    Publicly sign cutout URLs for S3 storage and not already signed by the service.
+    This allows the frontend to serve the cutouts directly from S3 storage.
+    """
     if CONFIG.storage.is_s3:
         fs = _get_s3_fs()
-        if ret.science:
+        if ret.science and ret.science.startswith("s3://"):
             ret.science = fs.sign(ret.science, expiration=CONFIG.sync_ttl)
-        if ret.preview:
+        if ret.preview and ret.preview.startswith("s3://"):
             ret.preview = fs.sign(ret.preview, expiration=CONFIG.sync_ttl)
     else:
         if ret.science:
