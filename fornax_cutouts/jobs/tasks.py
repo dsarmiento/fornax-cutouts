@@ -368,6 +368,14 @@ def batch_watchdog(self: Task, job_id: str, batch_num: int, expected_count: int)
     for i in range(expected_count):
         if not r.batch_result_hexists(batch_num, i):
             stranded.append(descriptors[i])
+            celery_app.control.revoke(
+                EXECUTE_CUTOUT_TASK_ID_TEMPLATE.format(
+                    job_id=job_id,
+                    batch_num=batch_num,
+                    increment_id=i,
+                ),
+                terminate=True,
+            )
             if r.batch_task_was_started(batch_num, i):
                 r.decrement_executing_task_count()
             else:
@@ -385,7 +393,7 @@ def batch_watchdog(self: Task, job_id: str, batch_num: int, expected_count: int)
     bind=True,
     queue="high_mem",
 )
-def write_results(self: Task, job_id: str, batch_num: int):
+def write_results(self: Task, job_id: str, batch_num: int):  # noqa: C901
     """
     Batch result writer: collects completed cutout results and writes them to AsyncCutoutResults.
     Checks if the job is complete, and if not, schedules the next batch
@@ -444,7 +452,7 @@ def write_results(self: Task, job_id: str, batch_num: int):
                 task_id=BATCH_CUTOUTS_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=next_batch),
             )
 
-        else:
+        elif not job_in_flight:
             r.fail_job("No next batch and job not complete, unexpected state", ErrorType.FATAL)
             logger.warning(
                 f"Job {job_id} write results {batch_num}: no next batch and job not complete",

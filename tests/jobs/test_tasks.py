@@ -45,7 +45,10 @@ class TestBatchWatchdog:
         assert SyncRedisCutoutJob(redis_client=sync_redis, job_id=job_id).get_batch_outstanding(1) == 0
         mock_write_results.run.assert_called_once_with(job_id=job_id, batch_num=1)
 
-    def test_requeues_started_stranded_tasks(self, mock_redis_factory, mock_write_results, sync_redis, job_id):
+    @patch("fornax_cutouts.jobs.tasks.celery_app.control.revoke")
+    def test_requeues_started_stranded_tasks(
+        self, mock_revoke, mock_redis_factory, mock_write_results, sync_redis, job_id
+    ):
         mock_redis_factory.return_value = sync_redis
         keys = RedisKeys(job_id)
         descriptors = [descriptor(job_id, "a.fits"), descriptor(job_id, "b.fits")]
@@ -62,4 +65,5 @@ class TestBatchWatchdog:
         assert int(sync_redis.get(keys.executing_task_count)) == 0
         assert int(sync_redis.get(TOTAL_PENDING_TASKS_KEY)) == 1
         assert SyncRedisCutoutJob(redis_client=sync_redis, job_id=job_id).get_batch_outstanding(1) == 0
+        mock_revoke.assert_called_once_with(f"execute_cutout-{job_id}-1-1", terminate=True)
         mock_write_results.run.assert_called_once_with(job_id=job_id, batch_num=1)
