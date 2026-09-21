@@ -15,8 +15,8 @@ from redis.commands.json.path import Path
 from redis.commands.search.field import NumericField, TagField
 from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
-from vo_models.uws.models import ExecutionPhase, Jobs, JobSummary, Parameters, ShortJobDescription
-from vo_models.uws.types import ErrorType
+from vo_models.uws.models import Jobs, JobSummary, Parameters, ShortJobDescription
+from vo_models.uws.types import ErrorType, ExecutionPhase
 from vo_models.voresource.types import UTCTimestamp
 
 from fornax_cutouts.auth.registry import _UNKNOWN_CLIENT_BUCKET
@@ -203,10 +203,8 @@ def json_dumps_with_encoders(obj: Any) -> str:
     """
 
     def custom_encoders(o: Any) -> Any:
-        if isinstance(o, datetime):
-            return UTCTimestamp(o).isoformat()
-        if isinstance(o, UTCTimestamp):
-            return o.isoformat()
+        if isinstance(o, (UTCTimestamp, datetime, str)):
+            return UTCTimestamp._validate(o).isoformat()
         raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
 
     return json.dumps(obj, default=custom_encoders)
@@ -437,7 +435,10 @@ class AsyncRedisCutoutJob:
             pipe.set(self.__keys.queued_task_count, 0)
             pipe.set(self.__keys.executing_task_count, 0)
             pipe.set(self.__keys.completed_task_count, 0)
+            pipe.set(self.__keys.skipped_task_count, 0)
             pipe.set(self.__keys.current_batch_num, 0)
+            pipe.delete(self.__keys.pending_tasks)
+            pipe.delete(self.__keys.failed_tasks)
             pipe.set(self.__keys.cutout_limit_identity, identity)
             if cutout_limit is not None:
                 pipe.set(self.__keys.cutout_limit_max, cutout_limit)
@@ -464,7 +465,6 @@ class AsyncRedisCutoutJob:
             JobSummary: Parsed UWS job summary.
         """
         job_json = await self.ensure_exists()
-        # job_json.pop("results", None)
         if base_url:
             job_json["parameters"]["position"] = f"{base_url}/parameters/position"
 
@@ -1048,6 +1048,13 @@ class SyncRedisCutoutJob:
         Pipeline consolidation: ``update_job_phase`` and ``set_end_time`` are candidates
         to merge here.
         """
+        current_phase = self.__redis_client.json().get(self.__keys.uws, "$.phase")
+        if current_phase and current_phase[0] in (
+            ExecutionPhase.COMPLETED,
+            ExecutionPhase.ERROR,
+            ExecutionPhase.ABORTED,
+        ):
+            return
         self.update_job_phase(ExecutionPhase.COMPLETED)
         self.set_end_time()
 
@@ -1140,7 +1147,7 @@ class SyncRedisCutoutJob:
             batch_size (int): Maximum number of tasks to pop from the pending queue.
 
         Raises:
-            NoTasksRemainingInBatchError: When the pending queue is empty.
+            NoTasksRemainingInJobError: When the pending queue is empty.
 
         Returns:
             list[dict]: Task descriptor dicts for the batch.

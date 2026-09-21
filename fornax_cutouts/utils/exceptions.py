@@ -23,13 +23,6 @@ class PrincipalResolutionError(Exception):
         super().__init__(f"Auth provider {provider} failed to resolve principal: {error}")
 
 
-class NoTasksRemainingInBatchError(Exception):
-    def __init__(self, job_id: str, batch_num: int):
-        self.job_id = job_id
-        self.batch_num = batch_num
-        super().__init__(f"No cutout tasks remaining in {job_id} batch {batch_num}")
-
-
 class NoTasksRemainingInJobError(Exception):
     def __init__(self, job_id: str):
         self.job_id = job_id

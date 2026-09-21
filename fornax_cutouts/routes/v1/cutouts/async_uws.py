@@ -279,7 +279,7 @@ class CutoutsUWSHandler:
     @uws_router.get(
         "/async/{job_id}/destruction",
         summary="Get destruction time",
-        description=("Returns the job destruction time.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}"),
+        description=f"Returns the job destruction time.\n\n{html_link(UWS_RESTBINDING, 'UWS 1.1 REST binding')}",
     )
     async def get_job_destruction(
         self,

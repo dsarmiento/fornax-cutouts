@@ -267,7 +267,6 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
     try:
         batch_tasks = r.prepare_batch(batch_num, batch_size)
     except NoTasksRemainingInJobError:
-        r.complete_job()
         logger.info(
             f"Job {job_id} completed: no tasks remaining",
             extra={
@@ -424,8 +423,12 @@ def write_results(self: Task, job_id: str, batch_num: int):
         skipped_tasks = job_status["skipped_jobs"]
         pending_tasks = job_status["pending_jobs"]
         expected_total = job_status["total_jobs"]
+        executing_tasks = job_status["executing_jobs"]
+        queued_tasks = job_status["queued_jobs"]
+
         total_completed = completed_tasks + failed_tasks + skipped_tasks
-        job_complete = total_completed == expected_total and pending_tasks == 0
+        job_in_flight = executing_tasks > 0 or queued_tasks > 0
+        job_complete = total_completed == expected_total and pending_tasks == 0 and not job_in_flight
         next_batch = -1
 
         if job_complete:
@@ -439,6 +442,18 @@ def write_results(self: Task, job_id: str, batch_num: int):
                     "batch_num": next_batch,
                 },
                 task_id=BATCH_CUTOUTS_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=next_batch),
+            )
+
+        else:
+            r.fail_job("No next batch and job not complete, unexpected state", ErrorType.FATAL)
+            logger.warning(
+                f"Job {job_id} write results {batch_num}: no next batch and job not complete",
+                extra={
+                    "event": "next_batch_not_scheduled",
+                    "job_id": job_id,
+                    "batch_num": batch_num,
+                    "job_status": job_status,
+                },
             )
 
         update_job_time = time.perf_counter()

@@ -72,7 +72,7 @@ CUTOUTS__LOG_LEVEL=info
 If you don't have Redis running locally, the quickest way is via Docker:
 
 ```bash
-docker run -d -p 6379:6379 redis:7
+docker run -d -p 6379:6379 valkey-bundle:8
 ```
 
 ---
