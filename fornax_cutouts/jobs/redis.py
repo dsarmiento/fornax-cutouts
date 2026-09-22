@@ -32,6 +32,13 @@ TOTAL_PENDING_TASKS_KEY = f"{CONFIG.worker.redis_prefix}:total_pending_tasks"
 CUTOUT_LIMIT_PREFIX = f"{CONFIG.worker.redis_prefix}:cutout_limit"
 POSITIONS_BATCH_SIZE = 100_000
 
+TERMINAL_PHASES = [
+    ExecutionPhase.COMPLETED,
+    ExecutionPhase.ERROR,
+    ExecutionPhase.ABORTED,
+    ExecutionPhase.ARCHIVED,
+]
+
 
 @dataclass
 class RedisKeys:
@@ -654,6 +661,18 @@ class SyncRedisCutoutJob:
         job_parameters = self.__redis_client.json().get(self.__keys.uws, "$.parameters")
         return job_parameters[0]
 
+    def get_job_phase(self) -> ExecutionPhase:
+        """
+        Return the UWS execution phase for this job.
+
+        Returns:
+            ExecutionPhase: UWS execution phase.
+        """
+        phase = self.__redis_client.json().get(self.__keys.uws, "$.phase")
+        if phase and phase[0]:
+            return ExecutionPhase(phase[0])
+        return ExecutionPhase.UNKNOWN
+
     def get_cutout_limit_budget(self) -> tuple[str | None, int | None, int | None]:
         """
         Return the cutout-limit snapshot recorded at job creation.
@@ -1012,14 +1031,7 @@ class SyncRedisCutoutJob:
 
         No-op when the job is already queued, executing, or terminal.
         """
-        current_phase = self.__redis_client.json().get(self.__keys.uws, "$.phase")
-        if current_phase and current_phase[0] in (
-            ExecutionPhase.QUEUED,
-            ExecutionPhase.EXECUTING,
-            ExecutionPhase.COMPLETED,
-            ExecutionPhase.ERROR,
-            ExecutionPhase.ABORTED,
-        ):
+        if self.get_job_phase() in (*TERMINAL_PHASES, ExecutionPhase.QUEUED, ExecutionPhase.EXECUTING):
             return
         self.update_job_phase(ExecutionPhase.QUEUED)
 
@@ -1030,13 +1042,7 @@ class SyncRedisCutoutJob:
         Idempotent once the job is executing or terminal. Pipeline consolidation:
         ``update_job_phase`` and ``set_start_time`` are candidates to merge here.
         """
-        current_phase = self.__redis_client.json().get(self.__keys.uws, "$.phase")
-        if current_phase and current_phase[0] in (
-            ExecutionPhase.EXECUTING,
-            ExecutionPhase.COMPLETED,
-            ExecutionPhase.ERROR,
-            ExecutionPhase.ABORTED,
-        ):
+        if self.get_job_phase() in (*TERMINAL_PHASES, ExecutionPhase.EXECUTING):
             return
         self.update_job_phase(ExecutionPhase.EXECUTING)
         self.set_start_time()
@@ -1048,12 +1054,7 @@ class SyncRedisCutoutJob:
         Pipeline consolidation: ``update_job_phase`` and ``set_end_time`` are candidates
         to merge here.
         """
-        current_phase = self.__redis_client.json().get(self.__keys.uws, "$.phase")
-        if current_phase and current_phase[0] in (
-            ExecutionPhase.COMPLETED,
-            ExecutionPhase.ERROR,
-            ExecutionPhase.ABORTED,
-        ):
+        if self.get_job_phase() in TERMINAL_PHASES:
             return
         self.update_job_phase(ExecutionPhase.COMPLETED)
         self.set_end_time()
@@ -1071,6 +1072,9 @@ class SyncRedisCutoutJob:
             message (str): Human-readable error summary for the UWS document.
             error_type (ErrorType): UWS error classification. Defaults to ``FATAL``.
         """
+        if self.get_job_phase() in TERMINAL_PHASES:
+            return
+
         self.__update_uws(
             path="$.error_summary",
             obj={"message": message, "type": error_type, "has_detail": False},

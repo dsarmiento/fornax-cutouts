@@ -386,7 +386,10 @@ def batch_watchdog(self: Task, job_id: str, batch_num: int, expected_count: int)
         r.increment_total_pending_tasks(len(stranded))
 
     r.reset_batch_outstanding(batch_num)
-    write_results.run(job_id=job_id, batch_num=batch_num)
+    write_results.apply_async(
+        kwargs={"job_id": job_id, "batch_num": batch_num},
+        task_id=WRITE_RESULTS_TASK_ID_TEMPLATE.format(job_id=job_id, batch_num=batch_num),
+    )
 
 
 @celery_app.task(
@@ -1133,7 +1136,7 @@ def execute_cutout(  # noqa: C901
         )
 
     except Exception as e:
-        if not is_async:
+        if is_async:
             remaining = r.fail_task(
                 batch_num=batch_num,
                 increment_id=increment_id,
