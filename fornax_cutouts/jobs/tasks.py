@@ -889,7 +889,6 @@ def generate_cutout(  # noqa: C901
             "bytes": cutout_bytes,
             "total_s": timings_s["total"],
             "output_formats": output_formats,
-            "is_signed_url": CONFIG.storage.is_s3 and CONFIG.storage.return_signed_urls,
         },
     )
     logger.debug(
