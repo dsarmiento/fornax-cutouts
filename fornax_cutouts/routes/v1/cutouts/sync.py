@@ -106,7 +106,7 @@ class CutoutsSyncHandler:
         async_result = await enqueue_task(
             execute_cutout,
             kwargs={
-                "job_id": "sync",
+                "job_id": job_id,
                 "source_file": filename,
                 "target": TargetPosition(ra, dec),
                 "size": size,

@@ -39,7 +39,8 @@ EXECUTE_CUTOUT_TASK_ID_TEMPLATE = "execute_cutout-{job_id}-{batch_num}-{incremen
 
 FITS_SUFFIXES = (".fit", ".fits", ".fts", ".fits.gz", ".fits.fz")
 ASDF_SUFFIXES = (".asdf",)
-_PLACEHOLDER_MISSIONS = frozenset(("", "sync", "sync_cutout"))
+SYNC_MISSIONS = ("sync", "sync_cutout")
+_PLACEHOLDER_MISSIONS = frozenset(("", *SYNC_MISSIONS))
 
 
 async def enqueue_task(task: Task | Callable[..., Any], **options: Any) -> Any:
@@ -761,7 +762,7 @@ def generate_cutout(  # noqa: C901
     generate_preview: bool = False,
     mission: str = "sync_cutout",
     metadata: dict = {},
-    job_id: str = "sync",
+    job_id: str = "",
 ) -> CutoutResponse:
     """
     Execute a cutout within the specific source file
@@ -780,7 +781,7 @@ def generate_cutout(  # noqa: C901
         metadata (dict, optional): Mission-specific metadata dictionary.
             Defaults to {}.
         job_id (str, optional): The job ID to generate the cutout for.
-            Defaults to "sync".
+            Defaults to "".
     """
     mission = _resolve_mission(source_file, mission)
     start_time = time.perf_counter()
@@ -834,7 +835,9 @@ def generate_cutout(  # noqa: C901
             dest_fname = cutout_fname.replace(temp_output_dir, output_dir)
             fs.put(lpath=cutout_fname, rpath=dest_fname)
             if CONFIG.storage.is_s3 and CONFIG.storage.return_signed_urls:
-                dest_fname = fs.sign(dest_fname, expiration=CONFIG.sync_ttl if job_id == "sync" else CONFIG.async_ttl)
+                dest_fname = fs.sign(
+                    dest_fname, expiration=CONFIG.sync_ttl if mission in SYNC_MISSIONS else CONFIG.async_ttl
+                )
             cutout_fname = dest_fname
 
         if img_fname:
@@ -843,7 +846,7 @@ def generate_cutout(  # noqa: C901
             fs.put(lpath=img_fname, rpath=img_dest_fname)
             if CONFIG.storage.is_s3 and CONFIG.storage.return_signed_urls:
                 img_dest_fname = fs.sign(
-                    img_dest_fname, expiration=CONFIG.sync_ttl if job_id == "sync" else CONFIG.async_ttl
+                    img_dest_fname, expiration=CONFIG.sync_ttl if mission in SYNC_MISSIONS else CONFIG.async_ttl
                 )
             img_fname = img_dest_fname
 
@@ -1093,7 +1096,7 @@ def execute_cutout(  # noqa: C901
         increment_id (int): Index within the batch for Redis aggregation.
     """
     mission = _resolve_mission(source_file, mission)
-    is_async = job_id != "sync"
+    is_async = mission not in SYNC_MISSIONS
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
     if isinstance(size, int):
