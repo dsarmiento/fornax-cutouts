@@ -18,6 +18,7 @@ Settings can be provided as environment variables or in a `.env` file in the wor
 | `CUTOUTS__SOURCE_PATH` | `path`   | —       | **Yes**  | Path to the directory containing mission source `.py` files. All `.py` files under this path are discovered and executed at startup. |
 | `CUTOUTS__LOG_LEVEL`   | `string` | `info`  | No       | Log level for the API and worker. Accepted values: `critical`, `error`, `warning`, `info`, `debug`.                                  |
 | `CUTOUTS__SYNC_TTL`    | `int`    | `3600`  | No       | Time-to-live in seconds for presigned S3 URLs returned by sync cutout endpoints. Default is 1 hour.                                  |
+| `CUTOUTS__ASYNC_TTL`   | `int`    | `604800`| No       | Time-to-live in seconds for async job state in Redis and the reported UWS destruction time. Default is 1 week.                       |
 
 ---
 
@@ -95,7 +96,7 @@ CUTOUTS__STORAGE__PREFIX=s3://my-cutouts-bucket/results
 
 # TTLs
 CUTOUTS__SYNC_TTL=3600
-CUTOUTS__ASYNC_TTL=1209600
+CUTOUTS__ASYNC_TTL=604800
 
 # Logging
 CUTOUTS__LOG_LEVEL=info
