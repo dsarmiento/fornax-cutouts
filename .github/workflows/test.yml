@@ -12,7 +12,7 @@ jobs:
 
     services:
       valkey:
-        image: valkey/valkey-bundle:8
+        image: valkey/valkey-bundle:9.1
         ports:
           - 6379:6379
         options: >-
