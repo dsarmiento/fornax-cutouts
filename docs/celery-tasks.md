@@ -82,6 +82,7 @@ flowchart LR
 ## Related configuration
 
 - **Batch sizing**: `batch_cutouts` uses `get_pool_size_for_queue("cutouts")` and `CONFIG.worker.batch_size_per_worker` to size each batch.
+- **Batch watchdog**: After each batch chord is queued, `batch_watchdog` is scheduled with an ETA of `CUTOUTS__WORKER__BATCH_WATCHDOG_TIMEOUT_MINUTES` (default `45`) to recover incomplete batches.
 - **Queues**: Deployments typically run workers subscribed to both `high_mem` and `cutouts` (or route them as needed) so orchestration and CPU/I/O cutouts can scale independently.
 
 See [Configuration](configuration.md) for worker-related environment variables and [Getting Started](getting-started.md) for running the API and workers locally.
