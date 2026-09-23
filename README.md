@@ -73,7 +73,7 @@ export CUTOUTS__SOURCE_PATH=/path/to/your/sources
 export CUTOUTS__REDIS__HOST=localhost
 
 # Start Redis
-docker run -d -p 6379:6379 valkey/valkey-bundle:8
+docker run -d -p 6379:6379 valkey/valkey-bundle:9.1
 
 # Start API
 fornax-cutouts api
