@@ -61,15 +61,15 @@ _SINGLE_CUTOUT_RESULT = {
     "mission": "sync",
     "position": {"ra": _SYNC_RA, "dec": _SYNC_DEC},
     "size_px": [_SYNC_SIZE, _SYNC_SIZE],
-    "science": "cutouts/sync/job/file.fits",
-    "preview": "cutouts/sync/job/file.jpg",
+    "science": "s3://bucket/cutouts/sync/job/file.fits",
+    "preview": "s3://bucket/cutouts/sync/job/file.jpg",
 }
 
 _COLOR_CUTOUT_RESULT = {
     "mission": "sync",
     "position": {"ra": _SYNC_RA, "dec": _SYNC_DEC},
     "size_px": [_SYNC_SIZE, _SYNC_SIZE],
-    "preview": "cutouts/sync/job/color.jpg",
+    "preview": "s3://bucket/cutouts/sync/job/color.jpg",
 }
 
 _ZERO_RESULT_STATUS = {
@@ -385,6 +385,7 @@ class TestSync:
     def test_single_cutout_signs_s3_urls_off_loop(self, api, monkeypatch):
         recorded = _offloaded_funcs(monkeypatch)
         monkeypatch.setattr(CONFIG.storage, "prefix", "s3://bucket")
+        monkeypatch.setattr(CONFIG.storage, "return_signed_urls", True)
         monkeypatch.setattr("fornax_cutouts.routes.v1.cutouts.sync._s3_fs", None, raising=False)
         mock_fs = MagicMock()
         mock_fs.sign.side_effect = lambda path, expiration=None: f"signed:{path}"
@@ -402,6 +403,7 @@ class TestSync:
 
     def test_single_cutout_strips_local_prefix(self, api, monkeypatch):
         monkeypatch.setattr(CONFIG.storage, "prefix", "/data")
+        monkeypatch.setattr(CONFIG.storage, "return_signed_urls", False)
         payload = {
             **_SINGLE_CUTOUT_RESULT,
             "science": "/data/cutouts/sync/job/file.fits",
