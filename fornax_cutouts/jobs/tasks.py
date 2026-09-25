@@ -23,7 +23,7 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import SyncRedisCutoutJob
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.models.base import TargetPosition
-from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse
+from fornax_cutouts.models.cutouts import CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutLimitExceededError, NoTasksRemainingInJobError
 from fornax_cutouts.utils.santa_resolver import resolve_positions
@@ -577,19 +577,6 @@ class CutoutHandler:
         """
         pass
 
-    @abstractmethod
-    def get_filter(self, i) -> str | None:
-        """
-        Retrieve the filter information for the cutout of the i-th input file.
-
-        Args:
-            i (int): Index of the cutout.
-
-        Returns:
-            str | None: Filter information if available, otherwise None.
-        """
-        pass
-
 
 class FITSCutoutHandler(CutoutHandler):
     """
@@ -638,21 +625,6 @@ class FITSCutoutHandler(CutoutHandler):
             img_fname = img_fname[0]
         return img_fname
 
-    def get_filter(self, i) -> str | None:
-        if self.cutout is None:
-            self._make_cutout()
-
-        fits_cutout = self.cutout.fits_cutouts[i]
-        filter = None
-
-        try:
-            cutout_header = fits_cutout["CUTOUT"].header
-            filter = cutout_header["*FILTER*"][0]
-        except KeyError:
-            pass
-
-        return filter
-
 
 class ASDFCutoutHandler(CutoutHandler):
     """
@@ -697,19 +669,6 @@ class ASDFCutoutHandler(CutoutHandler):
             minmax_percent=MINMAX_PERCENT,
         )[0]
         return img_fname
-
-    def get_filter(self, i) -> str | None:
-        """Get the filter info from the instrument metadata"""
-        if self.cutout is None:
-            self._make_cutout()
-
-        filter = None
-        try:
-            filter = self.cutout.asdf_cutouts[i]["roman"]["meta"]["instrument"]["optical_element"]
-        except KeyError:
-            pass
-
-        return filter
 
 
 def setup_filesystem(output_dir: str) -> AbstractFileSystem:
@@ -904,8 +863,6 @@ def generate_cutout(  # noqa: C901
         },
     )
     filter_val = metadata.get("filter")
-    if not filter_val:
-        filter_val = cutout_handler.get_filter(0)
 
     mission_extras = {k: v for k, v in metadata.items() if k != "filter"}
     return CutoutResponse(
@@ -1018,11 +975,6 @@ def generate_color_preview(
         mission=mission,
         position=target,
         size_px=size,
-        filter=ColorFilter(
-            red=cutout_handler.get_filter(0),
-            green=cutout_handler.get_filter(1),
-            blue=cutout_handler.get_filter(2),
-        ),
         preview=img_fname,
     )
 
