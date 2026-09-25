@@ -62,7 +62,7 @@ The service reads a `.env` file from the working directory automatically:
 CUTOUTS__SOURCE_PATH=/path/to/your/sources
 CUTOUTS__REDIS__HOST=localhost
 CUTOUTS__STORAGE__PREFIX=s3://my-bucket/cutouts
-CUTOUTS__LOG_LEVEL=info
+CUTOUTS__LOG__LEVEL=info
 ```
 
 ---
