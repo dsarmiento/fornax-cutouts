@@ -73,7 +73,7 @@ Sync endpoints execute cutouts inline and return results immediately. Suitable f
 | `size`            | `int`    | Yes      | Cutout size in pixels.                                  |
 | `include_preview` | `bool`   | No       | Also generate a JPEG preview alongside the FITS cutout. |
 
-For S3 storage backends, sync results are returned as presigned URLs valid for `CUTOUTS__SYNC_TTL` seconds (default: 1 hour).
+For S3 storage backends, sync results are returned as presigned HTTPS URLs. The API signs any `s3://` paths returned by the worker. Expiration is `CUTOUTS__SYNC_TTL` seconds (default: 1 hour). When `CUTOUTS__STORAGE__RETURN_SIGNED_URLS` is `true`, workers may already return presigned URLs (see [Configuration](../configuration.md#storage-settings)).
 
 ---
 
