@@ -51,13 +51,21 @@ class AbstractMissionSource(ABC):
 
         return []
 
-    def validate_request(self, size: int, **extras):
+    def validate_request(self, size: int | tuple[int, int], **extras):
+        """Validate mission parameters against the cutout size (in pixels).
+
+        ``size`` may be a scalar (square cutout) or an (x, y) pixel tuple. Each
+        axis must be positive and smaller than ``metadata.max_cutout_size``.
+        """
         filter = extras.get("filter", [])
         survey = extras.get("survey", [])
 
+        if isinstance(size, int):
+            size = (size, size)
+
         is_valid = True
-        is_valid &= size > 0
-        is_valid &= size <= self.metadata.max_cutout_size
+        is_valid &= all(dim > 0 for dim in size)
+        is_valid &= all(dim <= self.metadata.max_cutout_size for dim in size)
         is_valid &= self._validate_list_parameter(filter, self.metadata.filter)
         is_valid &= self._validate_list_parameter(survey, self.metadata.survey)
 

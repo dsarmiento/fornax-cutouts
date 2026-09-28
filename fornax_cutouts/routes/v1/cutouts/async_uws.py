@@ -109,7 +109,7 @@ class CutoutsUWSHandler:
         multimission_request: Annotated[MultiMissionCutoutRequest, Depends(form_parser(MultiMissionCutoutRequest))],
     ):
         position = multimission_request.position
-        size = multimission_request.size
+        size = multimission_request.size.model_dump()
         generate_science = multimission_request.generate_science
         generate_preview = multimission_request.generate_preview
         run_id = multimission_request.run_id

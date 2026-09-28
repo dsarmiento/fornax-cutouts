@@ -4,6 +4,7 @@ from typing import Annotated, TypeVar
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.utils.units import SizeSpec, _parse_size
 
 
 def ensure_list(v) -> list:
@@ -97,9 +98,13 @@ class MultiMissionRequest(BaseModel):
 
 
 class MultiMissionCutoutRequest(MultiMissionRequest):
-    """Cutout request across multiple missions."""
+    """Cutout request across multiple missions.
 
-    size: int
+    ``size`` accepts either an int (interpreted as pixels) or a
+    SizeSpec dict with ``x``, optional ``y`` (defaults to ``x``), and ``units`` (``px``, ``s``, ``m``, ``d``).
+    """
+
+    size: Annotated[SizeSpec, BeforeValidator(_parse_size)]
     generate_science: bool = Field(True)
     generate_preview: bool = Field(False)
     run_id: Annotated[str, Field(description="RUNID for the request", max_length=64, alias="RUNID")] = ""
