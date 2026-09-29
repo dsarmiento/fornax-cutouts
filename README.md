@@ -4,6 +4,17 @@ Pluggable backend for async FITS image cutouts with [FastAPI](https://fastapi.ti
 [Celery](https://docs.celeryq.dev/) + [Astrocut](https://github.com/spacetelescope/astrocut) using the
 [IVOA UWS](https://www.ivoa.net/documents/UWS/) standard.
 
+## Welcome
+
+This repository is the codebase for a **generalized** astronomical image cutout service.
+The goal is to make it easier for archives and mission teams to stand up their own cutout services for their holdings without reimplementing async job handling, worker dispatch, and a standards-based REST API.
+You add mission-specific data sources and deploy to your own infrastructure.
+The framework supplies the cutout pipeline, UWS-based API and job metadata management.
+The library is meant to be used by archives and other teams to deploy and extend it for their own data.
+For example, MAST's cutouts service is one such deployment.
+Collaboration happens on GitHub: use [issues](https://github.com/nasa-fornax/fornax-cutouts/issues) to report problems or discuss changes that benefit others, and open pull requests to contribute improvements upstream.
+See [Contributing](#contributing) to get started.
+
 ## Overview
 
 Fornax Cutouts provides a framework for building astronomical image cutout services. Define mission-specific data

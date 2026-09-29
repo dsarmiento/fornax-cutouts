@@ -29,7 +29,7 @@ fornax-cutouts api [OPTIONS]
 | `--port INTEGER`                                             | `8000`                    | TCP port to listen on. Must be between 1 and 65535.                                                         |
 | `-w, --workers INTEGER`                                      | `1`                       | Number of Uvicorn worker processes. Cannot be combined with `--reload`.                                     |
 | `--reload / --no-reload`                                     | `--no-reload`             | Enable auto-reload on code changes. Intended for development only. Mutually exclusive with `--workers > 1`. |
-| `--log-level [critical\|error\|warning\|info\|debug\|trace]` | from `CUTOUTS__LOG_LEVEL` | Uvicorn log verbosity.                                                                                      |
+| `--log-level [critical\|error\|warning\|info\|debug\|trace]` | from `CUTOUTS__LOG__LEVEL` | Uvicorn log verbosity.                                                                                     |
 
 ### Examples
 
@@ -71,7 +71,7 @@ The worker connects to Redis (configured via `CUTOUTS__REDIS__*`) and begins con
 | `--autoscale MAX,MIN`                                 | —                         | Enable Celery autoscaling. Provide as `MAX,MIN` (e.g. `8,2` to scale between 2 and 8 processes).                           |
 | `-c, --concurrency INTEGER`                           | —                         | Number of concurrent worker processes or threads. Defaults to the number of CPUs when not set.                             |
 | `-Q, --queues TEXT`                                   | `cutouts,high_mem`        | Comma-separated list of queues to consume from.                                                                            |
-| `--log-level [CRITICAL\|ERROR\|WARNING\|INFO\|DEBUG]` | from `CUTOUTS__LOG_LEVEL` | Celery log verbosity.                                                                                                      |
+| `--log-level [CRITICAL\|ERROR\|WARNING\|INFO\|DEBUG]` | from `CUTOUTS__LOG__LEVEL` | Celery log verbosity.                                                                                                     |
 
 ### Queues
 
@@ -116,6 +116,6 @@ fornax-cutouts worker -n cutouts-worker@myhost -Q cutouts -c 4
 
 ## Environment Variable Defaults
 
-Both commands read `CUTOUTS__LOG_LEVEL` from the environment to set their default log level. This means you can set the log level once in your `.env` file and it applies to both the API and worker without repeating it on the command line.
+Both commands read `CUTOUTS__LOG__LEVEL` from the environment to set their default log level. This means you can set the log level once in your `.env` file and it applies to both the API and worker without repeating it on the command line.
 
 See [Configuration](configuration.md) for all available environment variables.
