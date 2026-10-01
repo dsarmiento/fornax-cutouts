@@ -95,7 +95,6 @@ def schedule_job(
 
     r.queue_job()
     job_parameters = r.get_job_parameters()
-    # ``size`` may be stored as a scalar (pixels) or a SizeSpec dict.
     size: SizeSpec = _parse_size(job_parameters.pop("size"))
     generate_science = job_parameters.pop("generate_science", True)
     generate_preview = job_parameters.pop("generate_preview", False)
@@ -134,7 +133,6 @@ def schedule_job(
     total_jobs = 0
     mission_cutout_counts: defaultdict[str, int] = defaultdict(int)
 
-    # Resolve the requested cutout size to mission pixel tuples using each mission's plate scale.
     size_px_by_mission: dict[str, tuple[int, int]] = {
         mission: cutout_registry.resolve_size_px(mission, size) for mission in valid_mission_params
     }
