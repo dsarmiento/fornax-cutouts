@@ -73,10 +73,10 @@ def to_pixels(value: float, units: str, plate_scale_arcsec: float) -> int:
 
     quantity = value * astropy_unit
     if astropy_unit is u.pix:
-        return int(round(quantity.value))
+        return round(quantity.value)
 
     arcsec = quantity.to(u.arcsec).value
-    return int(round(arcsec / plate_scale_arcsec))
+    return round(arcsec / plate_scale_arcsec)
 
 
 def size_spec_to_pixels(spec: SizeSpec, plate_scale_arcsec: float) -> tuple[int, int]:
