@@ -27,7 +27,7 @@ from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutLimitExceededError, NoTasksRemainingInJobError
 from fornax_cutouts.utils.santa_resolver import resolve_positions
-from fornax_cutouts.utils.units import SizeSpec, _parse_size
+from fornax_cutouts.utils.units import SizeSpec
 
 STRETCH = "asinh"  # "sinh"
 MINMAX_PERCENT: list[float] = [0.5, 99.5]
@@ -95,7 +95,11 @@ def schedule_job(
 
     r.queue_job()
     job_parameters = r.get_job_parameters()
-    size: SizeSpec = _parse_size(job_parameters.pop("size"))
+    size = SizeSpec(
+        x=job_parameters.pop("size"),
+        y=job_parameters.pop("y", None),
+        units=job_parameters.pop("units", "px"),
+    )
     generate_science = job_parameters.pop("generate_science", True)
     generate_preview = job_parameters.pop("generate_preview", False)
 

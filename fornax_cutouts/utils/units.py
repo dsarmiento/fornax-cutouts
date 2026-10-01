@@ -32,29 +32,6 @@ class SizeSpec(BaseModel):
         return self
 
 
-def _parse_size(value):
-    """Accept a bare int/float (pixels), a SizeSpec, a dict, or a string.
-
-    A bare number is interpreted as pixels. Strings are parsed as JSON first; if that
-    fails, they are treated as a numeric pixel value.
-    """
-    if isinstance(value, SizeSpec):
-        return value
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return SizeSpec(x=float(value), units="px")
-    if isinstance(value, dict):
-        return SizeSpec(**value)
-    if isinstance(value, str):
-        import json
-
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            return SizeSpec(x=float(value), units="px")
-        return _parse_size(parsed)
-    raise TypeError(f"Cannot parse size from {type(value).__name__}: {value!r}")
-
-
 def to_pixels(value: float, units: str, plate_scale_arcsec: float) -> int:
     """Convert a size in the given units to an integer pixel count.
 
