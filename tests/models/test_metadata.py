@@ -1,11 +1,14 @@
 """Tests for metadata models and data normalization"""
 
-from fornax_cutouts.models.metadata import MultiMissionRequest
+import pytest
+
+from fornax_cutouts.models.metadata import MultiMissionCutoutRequest, MultiMissionRequest
 from fornax_cutouts.sources import AbstractMissionSource, MissionMetadata, cutout_registry
+from fornax_cutouts.utils.units import SizeSpec
 
 _FAKE_METADATA = MissionMetadata(
     name="fake_source",
-    pixel_size=1.0,
+    pixel_size=0.5,
     max_cutout_size=100,
     filter=["g"],
     survey=["s"],
@@ -13,7 +16,7 @@ _FAKE_METADATA = MissionMetadata(
 
 _OTHER_METADATA = MissionMetadata(
     name="other_source",
-    pixel_size=1.0,
+    pixel_size=0.25,
     max_cutout_size=100,
     filter=["g"],
     survey=["s"],
@@ -34,7 +37,7 @@ class OtherSource(AbstractMissionSource):
         raise NotImplementedError
 
 
-def setup_function():
+def _setup_registry():
     cutout_registry._SOURCES.clear()
     if hasattr(cutout_registry, "_VALID_SOURCES"):
         del cutout_registry._VALID_SOURCES
@@ -42,10 +45,25 @@ def setup_function():
     cutout_registry._SOURCES["other_source"] = OtherSource()
 
 
-def teardown_function():
+def _teardown_registry():
     cutout_registry._SOURCES.clear()
     if hasattr(cutout_registry, "_VALID_SOURCES"):
         del cutout_registry._VALID_SOURCES
+
+
+@pytest.fixture(autouse=True)
+def _registry_fixture():
+    _setup_registry()
+    yield
+    _teardown_registry()
+
+
+def setup_function():
+    _setup_registry()
+
+
+def teardown_function():
+    _teardown_registry()
 
 
 def _missions_dump(request):
@@ -150,6 +168,57 @@ def test_dot_string_field_becomes_list():
         }
     )
     assert _missions_dump(request) == {"fake_source": {"survey": ["survey1"]}}
+
+
+class TestMultiMissionCutoutRequestSize:
+    def test_size_alone_is_square_pixels(self):
+        request = MultiMissionCutoutRequest.model_validate({"position": ["m101"], "size": "256"})
+        assert request.size_spec == SizeSpec(x=256, y=256, units="px")
+
+    def test_size_y_and_units(self):
+        request = MultiMissionCutoutRequest.model_validate(
+            {"position": ["m101"], "size": "60", "y": "30", "units": "s"}
+        )
+        assert request.size_spec == SizeSpec(x=60, y=30, units="s")
+
+
+class TestResolveSizePx:
+    def test_size_per_mission(self):
+        spec = SizeSpec(x=1, units="m")
+        assert cutout_registry.resolve_size_px("fake_source", spec) == (120, 120)
+        assert cutout_registry.resolve_size_px("other_source", spec) == (240, 240)
+
+    def test_pixel_sizespec_ignores_plate_scale(self):
+        assert cutout_registry.resolve_size_px("fake_source", SizeSpec(x=200, y=100, units="px")) == (200, 100)
+
+    def test_single_int_as_pixels(self):
+        assert cutout_registry.resolve_size_px("fake_source", 128) == (128, 128)
+
+    def test_tuple_passthrough(self):
+        assert cutout_registry.resolve_size_px("fake_source", (200, 100)) == (200, 100)
+
+
+class TestValidateMissionParams:
+    def test_sizespec_lt_mission_limit_passes(self):
+        result = cutout_registry.validate_mission_params(
+            mission_params={"fake_source": {"filter": ["g"]}},
+            size=SizeSpec(x=10, units="s"),
+        )
+        assert result == {"fake_source": True}
+
+    def test_sizespec_gt_mission_limit_fails(self):
+        result = cutout_registry.validate_mission_params(
+            mission_params={"fake_source": {"filter": ["g"]}},
+            size=SizeSpec(x=100, units="s"),
+        )
+        assert result == {"fake_source": False}
+
+    def test_mixed_mission_limits(self):
+        result = cutout_registry.validate_mission_params(
+            mission_params={"fake_source": {"filter": ["g"]}, "other_source": {"filter": ["g"]}},
+            size=SizeSpec(x=30, units="s"),
+        )
+        assert result == {"fake_source": True, "other_source": False}
 
 
 def test_normalization_does_not_mutate_input():
