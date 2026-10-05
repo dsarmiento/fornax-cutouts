@@ -4,7 +4,7 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi_utils.cbv import cbv
 from fsspec import AbstractFileSystem, filesystem
@@ -13,9 +13,38 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.tasks import enqueue_task, execute_color_preview, execute_cutout
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
+from fornax_cutouts.sources import cutout_registry
+from fornax_cutouts.utils.units import SizeUnit, to_pixels
 
 sync_router = APIRouter(prefix="/cutouts", tags=["Sync Cutouts"])
 _s3_fs: AbstractFileSystem | None = None
+
+
+def _resolve_sync_size(
+    filename: str,
+    x: float,
+    y: float | None,
+    units: SizeUnit,
+) -> tuple[int, int]:
+    """Resolve a sync request's x/y/units into an (x_px, y_px) tuple.
+
+    ``y`` defaults to ``x`` (square). Non-pixel units require the mission to be
+    inferable from ``filename`` so we can look up its plate scale.
+    """
+    if y is None:
+        y = x
+
+    if units == "px":
+        return (round(x), round(y))
+
+    mission = cutout_registry.infer_mission(filename)
+    if mission is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot infer mission from filename to resolve non-pixel units {units!r}. Use units=px.",
+        )
+    plate_scale = cutout_registry.get_mission(mission).metadata.pixel_size
+    return (to_pixels(x, units, plate_scale), to_pixels(y, units, plate_scale))
 
 
 def _get_s3_fs() -> AbstractFileSystem:
@@ -89,7 +118,11 @@ class CutoutsSyncHandler:
         filename: Annotated[str, Query(description="Publicly available source URL/S3 URI to generate a cutout for")],
         ra: Annotated[float, Query(description="Central RA coordinate to generate cutout for")],
         dec: Annotated[float, Query(description="Central Dec coordinate to generate cutout for")],
-        size: Annotated[int, Query(description="Width and height of the cutout in pixels")],
+        size: Annotated[float, Query(description="Cutout width; height defaults to this if 'y' is omitted", gt=0)],
+        y: Annotated[float | None, Query(description="Cutout height; defaults to 'size' (square)", gt=0)] = None,
+        units: Annotated[
+            SizeUnit, Query(description="Units for size/y: px (default), s (arcsec), m (arcmin), d (deg)")
+        ] = "px",
         include_preview: Annotated[bool, Query(description="Include a JPEG preview of the cutout")] = True,
         job_id: Annotated[str, Query(description="Job ID to generate the cutout for")] = "",
     ) -> CutoutResponse:
@@ -100,6 +133,8 @@ class CutoutsSyncHandler:
         if not job_id:
             job_id = uuid.uuid4().hex[:8]
 
+        size_px = _resolve_sync_size(filename, size, y, units)
+
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
         task_uid = uuid.uuid4().hex[:12]
 
@@ -109,7 +144,7 @@ class CutoutsSyncHandler:
                 "job_id": job_id,
                 "source_file": filename,
                 "target": TargetPosition(ra, dec),
-                "size": size,
+                "size": size_px,
                 "generate_science": True,
                 "generate_preview": include_preview,
                 "output_dir": output_dir,
@@ -136,7 +171,11 @@ class CutoutsSyncHandler:
         blue: Annotated[str, Query(description="Blue channel for a color cutout preview")],
         ra: Annotated[float, Query(description="Central RA coordinate to generate cutout for")],
         dec: Annotated[float, Query(description="Central Dec coordinate to generate cutout for")],
-        size: Annotated[int, Query(description="Width and height of the cutout in pixels")],
+        size: Annotated[float, Query(description="Cutout width; height defaults to this if 'y' is omitted", gt=0)],
+        y: Annotated[float | None, Query(description="Cutout height; defaults to 'size' (square)", gt=0)] = None,
+        units: Annotated[
+            SizeUnit, Query(description="Units for size/y: px (default), s (arcsec), m (arcmin), d (deg)")
+        ] = "px",
         job_id: Annotated[str, Query(description="Job ID to generate the cutout for")] = "",
     ) -> CutoutResponse:
         """
@@ -144,6 +183,9 @@ class CutoutsSyncHandler:
         """
         if not job_id:
             job_id = uuid.uuid4().hex[:8]
+
+        # Any of the three inputs will do for mission inference; they're the same mission.
+        size_px = _resolve_sync_size(red, size, y, units)
 
         output_dir = f"{CONFIG.storage.prefix}/cutouts/sync/{job_id}"
         task_uid = uuid.uuid4().hex[:12]
@@ -155,7 +197,7 @@ class CutoutsSyncHandler:
                 "green": green,
                 "blue": blue,
                 "target": TargetPosition(ra, dec),
-                "size": size,
+                "size": size_px,
                 "output_dir": output_dir,
             },
             task_id=f"sync-color-{job_id}-{task_uid}",

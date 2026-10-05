@@ -300,7 +300,7 @@ class TestSync:
         kwargs = call.kwargs["kwargs"]
         assert kwargs["source_file"] == _SYNC_FILENAME
         assert kwargs["target"] == TargetPosition(_SYNC_RA, _SYNC_DEC)
-        assert kwargs["size"] == _SYNC_SIZE
+        assert kwargs["size"] == (_SYNC_SIZE, _SYNC_SIZE)
         assert kwargs["generate_science"] is True
         assert kwargs["generate_preview"] is True
         assert kwargs["mission"] == "sync"
@@ -329,7 +329,7 @@ class TestSync:
         assert kwargs["green"] == _SYNC_GREEN
         assert kwargs["blue"] == _SYNC_BLUE
         assert kwargs["target"] == TargetPosition(_SYNC_RA, _SYNC_DEC)
-        assert kwargs["size"] == _SYNC_SIZE
+        assert kwargs["size"] == (_SYNC_SIZE, _SYNC_SIZE)
         assert call.kwargs["priority"] == 0
         assert call.kwargs["task_id"].startswith("sync-color-")
 
@@ -400,6 +400,55 @@ class TestSync:
         assert body["preview"] == f"signed:{_SINGLE_CUTOUT_RESULT['preview']}"
         assert mock_fs.sign.call_count == 2
         assert "_public_cutout_urls" in _offloaded_names(recorded)
+
+    def test_single_cutout_rectangular(self, api):
+        response = api.client.get(
+            "/api/v0/cutouts/sync/single",
+            params={
+                "filename": _SYNC_FILENAME,
+                "ra": _SYNC_RA,
+                "dec": _SYNC_DEC,
+                "size": 300,
+                "y": 150,
+            },
+        )
+        assert response.status_code == 200
+        kwargs = api.execute_cutout.apply_async.call_args.kwargs["kwargs"]
+        assert kwargs["size"] == (300, 150)
+
+    def test_single_cutout_arcsec_units_converted_via_mission(self, api, monkeypatch):
+        monkeypatch.setattr(cutout_registry, "infer_mission", lambda _: "fake_source")
+        response = api.client.get(
+            "/api/v0/cutouts/sync/single",
+            params={
+                "filename": _SYNC_FILENAME,
+                "ra": _SYNC_RA,
+                "dec": _SYNC_DEC,
+                "size": 55,
+                "units": "s",
+            },
+        )
+        assert response.status_code == 200
+        kwargs = api.execute_cutout.apply_async.call_args.kwargs["kwargs"]
+        assert kwargs["size"] == (100, 100)
+
+    def test_color_preview_rectangular_and_arcmin(self, api, monkeypatch):
+        monkeypatch.setattr(cutout_registry, "infer_mission", lambda _: "fake_source")
+        response = api.client.get(
+            "/api/v0/cutouts/sync/color",
+            params={
+                "red": _SYNC_RED,
+                "green": _SYNC_GREEN,
+                "blue": _SYNC_BLUE,
+                "ra": _SYNC_RA,
+                "dec": _SYNC_DEC,
+                "size": 1,
+                "units": "m",
+            },
+        )
+        assert response.status_code == 200
+        kwargs = api.execute_color_preview.apply_async.call_args.kwargs["kwargs"]
+        assert kwargs["size"] == (109, 109)
 
     def test_single_cutout_strips_local_prefix(self, api, monkeypatch):
         monkeypatch.setattr(CONFIG.storage, "prefix", "/data")
@@ -475,7 +524,7 @@ class TestRequestFormats:
         form_data = {
             k: json.dumps(v) if isinstance(v, dict) else v
             for k, v in MultiMissionCutoutRequest(missions={"fake_source": filename_request}, position=["m101"], size=4)
-            .model_dump()
+            .model_dump(exclude_none=True)
             .items()
         }
 
@@ -574,6 +623,24 @@ class TestRequestFormats:
         assert response.status_code == 422
         assert response.json()["detail"] == "At least one mission must be specified"
 
+    def test_async_rectangular_angular_size(self, api):
+        response = api.client.post(
+            "/api/v0/cutouts/async",
+            data={"position": ["m101"], "size": "60", "y": "30", "units": "s", "fake_source": '{"filter": ["a"]}'},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        params = _job_uws(api.redis, _created_job_id(response))["parameters"]
+        assert (params["size"], params["y"], params["units"]) == (60, 30, "s")
+
+    def test_async_invalid_size_units_rejected(self, api):
+        response = api.client.post(
+            "/api/v0/cutouts/async",
+            data={"position": ["m101"], "size": "60", "units": "parsec", "fake_source": '{"filter": ["a"]}'},
+            follow_redirects=False,
+        )
+        assert response.status_code == 422
+
     def test_extra_filename_params_are_forwarded(self, api):
         response = api.client.post(
             "/api/v0/filenames/fake_source",
@@ -604,6 +671,8 @@ class TestAsyncUWS:
         job = _job_uws(api.redis, job_id)
         assert job["run_id"] == "test-run-id"
         assert job["parameters"]["size"] == 256
+        assert job["parameters"]["y"] == 256
+        assert job["parameters"]["units"] == "px"
         assert job["parameters"]["generate_science"] is True
         assert job["parameters"]["generate_preview"] is True
         assert job["parameters"]["fake_source"]["stack_file"] == "data"
@@ -777,7 +846,9 @@ class TestJobSpecific:
         assert response.status_code == 200
         assert "xml" in response.headers["content-type"]
         params = _params_by_id(_xml(response.text))
-        assert params["size"] == ["256"]
+        assert params["size"] == ["256.0"]
+        assert params["y"] == ["256.0"]
+        assert params["units"] == ["px"]
         assert params["fake_source.filter"] == ["a", "b"]
         assert params["fake_source.survey"] == ["s"]
         assert params["fake_source.stack_file"] == ["data"]

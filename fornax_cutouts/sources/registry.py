@@ -7,6 +7,7 @@ from fornax_cutouts.models.base import Positions
 from fornax_cutouts.models.cutouts import FilenameLookupResponse
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata
 from fornax_cutouts.utils.logging import get_logger
+from fornax_cutouts.utils.units import SizeSpec, size_spec_to_pixels
 
 _MissionSourceT = TypeVar("_MissionSourceT", bound=AbstractMissionSource)
 
@@ -67,17 +68,30 @@ class CutoutRegistry:
         """
         return {mission.metadata.name: mission.metadata for mission in self._SOURCES.values()}
 
+    def resolve_size_px(self, mission: str, size: SizeSpec | int | tuple[int, int]) -> tuple[int, int]:
+        """Resolve a requested cutout size to an (x_px, y_px) pixel tuple for ``mission``.
+
+        A bare int/tuple is treated as pixels. A SizeSpec is converted using the mission's
+        ``metadata.pixel_size`` (arcsec/pixel).
+        """
+        if isinstance(size, tuple):
+            return size
+        if isinstance(size, int):
+            return (size, size)
+        return size_spec_to_pixels(size, self.get_mission(mission).metadata.pixel_size)
+
     def validate_mission_params(
         self,
         mission_params: dict[str, dict],
-        size: int | None = None,
+        size: SizeSpec | int | None = None,
     ) -> dict[str, bool]:
         """
         Validate the mission parameters.
 
         Args:
             mission_params (dict[str, dict]): The mission parameters to validate by mission name.
-            size (int | None): The size to validate the mission parameters for.
+            size (SizeSpec | int | None): The requested cutout size. A SizeSpec is resolved via each mission's
+                plate scale; an int is treated as pixels.
 
         Returns:
             dict[str, bool]: The validation results for the mission parameters by mission name.
@@ -92,7 +106,7 @@ class CutoutRegistry:
             params_to_validate = dict(params)
             if "size" not in params_to_validate:
                 if size is not None:
-                    params_to_validate["size"] = size
+                    params_to_validate["size"] = self.resolve_size_px(mission, size)
                 else:
                     validation_results[mission] &= False
                     continue
@@ -105,7 +119,7 @@ class CutoutRegistry:
         self,
         position: Positions,
         mission_params: dict[str, dict],
-        size: int | None = None,
+        size: SizeSpec | int | None = None,
     ) -> list[FilenameLookupResponse]:
         """
         Get the target filenames for a given position and mission parameters.
@@ -113,7 +127,7 @@ class CutoutRegistry:
         Args:
             position (Positions): The position to get the filenames for.
             mission_params (dict[str, dict]): The mission parameters to get the filenames for.
-            size (int | None): The size to get the filenames for.
+            size (SizeSpec | int | None): The requested cutout size.
 
         Returns:
             list[FilenameLookupResponse]: The target filenames for the given position and mission parameters.

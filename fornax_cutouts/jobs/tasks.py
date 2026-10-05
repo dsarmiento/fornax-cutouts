@@ -27,6 +27,7 @@ from fornax_cutouts.models.cutouts import CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutLimitExceededError, NoTasksRemainingInJobError
 from fornax_cutouts.utils.santa_resolver import resolve_positions
+from fornax_cutouts.utils.units import SizeSpec
 
 STRETCH = "asinh"  # "sinh"
 MINMAX_PERCENT: list[float] = [0.5, 99.5]
@@ -94,7 +95,11 @@ def schedule_job(
 
     r.queue_job()
     job_parameters = r.get_job_parameters()
-    size = job_parameters.pop("size")
+    size = SizeSpec(
+        x=job_parameters.pop("size"),
+        y=job_parameters.pop("y", None),
+        units=job_parameters.pop("units", "px"),
+    )
     generate_science = job_parameters.pop("generate_science", True)
     generate_preview = job_parameters.pop("generate_preview", False)
 
@@ -102,12 +107,12 @@ def schedule_job(
     mission_params = {mission: params for mission, params in job_parameters.items() if mission in source_names}
 
     logger.debug(
-        f"Job {job_id} received: missions={list(mission_params.keys())} size={size}",
+        f"Job {job_id} received: missions={list(mission_params.keys())} size={size.model_dump()}",
         extra={
             "event": "job_parameters",
             "job_id": job_id,
             "missions": list(mission_params.keys()),
-            "size": size,
+            "size": size.model_dump(),
             "generate_science": generate_science,
             "generate_preview": generate_preview,
         },
@@ -132,6 +137,10 @@ def schedule_job(
     total_jobs = 0
     mission_cutout_counts: defaultdict[str, int] = defaultdict(int)
 
+    size_px_by_mission: dict[str, tuple[int, int]] = {
+        mission: cutout_registry.resolve_size_px(mission, size) for mission in valid_mission_params
+    }
+
     # Scan the job positions from the Redis list in batches and build the cutout descriptors.
     for positions in r.scan_job_positions():
         resolved_positions = resolve_positions(positions)
@@ -144,12 +153,14 @@ def schedule_job(
 
         descriptors = []
         for target_fname in target_fnames:
+            mission_size_px = size_px_by_mission.get(target_fname.mission)
+            resolved_size = target_fname.size or mission_size_px
             for filename_obj in target_fname.filenames:
                 descriptor = {
                     "job_id": job_id,
                     "source_file": filename_obj.filename,
                     "target": [target_fname.target.ra, target_fname.target.dec],  # Convert NamedTuple to list for JSON
-                    "size": target_fname.size or size,
+                    "size": resolved_size,
                     "generate_science": generate_science,
                     "generate_preview": generate_preview,
                     "output_dir": f"{CONFIG.storage.prefix}/cutouts/async/{job_id}/{target_fname.mission}",
@@ -997,6 +1008,8 @@ def execute_color_preview(
         target = TargetPosition(ra=target[0], dec=target[1])
     if isinstance(size, int):
         size = (size, size)
+    elif isinstance(size, list):
+        size = (int(size[0]), int(size[1]))
     return generate_color_preview(
         red=red,
         green=green,
@@ -1053,6 +1066,8 @@ def execute_cutout(  # noqa: C901
         target = TargetPosition(ra=target[0], dec=target[1])
     if isinstance(size, int):
         size = (size, size)
+    elif isinstance(size, list):
+        size = (int(size[0]), int(size[1]))
 
     resp = None
     r: SyncRedisCutoutJob | None = None
