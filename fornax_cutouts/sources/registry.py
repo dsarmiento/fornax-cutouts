@@ -68,30 +68,26 @@ class CutoutRegistry:
         """
         return {mission.metadata.name: mission.metadata for mission in self._SOURCES.values()}
 
-    def resolve_size_px(self, mission: str, size: SizeSpec | int | tuple[int, int]) -> tuple[int, int]:
-        """Resolve a requested cutout size to an (x_px, y_px) pixel tuple for ``mission``.
+    def resolve_size_px(self, mission: str, size: SizeSpec) -> tuple[int, int]:
+        """Estimate the (x_px, y_px) size of a cutout for ``mission`` using its nominal plate scale.
 
-        A bare int/tuple is treated as pixels. A SizeSpec is converted using the mission's
-        ``metadata.pixel_size`` (arcsec/pixel).
+        Used to check requests against ``max_cutout_size``. The cutout itself is sized by astrocut
+        from each file's WCS, which may differ from ``metadata.pixel_size``.
         """
-        if isinstance(size, tuple):
-            return size
-        if isinstance(size, int):
-            return (size, size)
         return size_spec_to_pixels(size, self.get_mission(mission).metadata.pixel_size)
 
     def validate_mission_params(
         self,
         mission_params: dict[str, dict],
-        size: SizeSpec | int | None = None,
+        size: SizeSpec | None = None,
     ) -> dict[str, bool]:
         """
         Validate the mission parameters.
 
         Args:
             mission_params (dict[str, dict]): The mission parameters to validate by mission name.
-            size (SizeSpec | int | None): The requested cutout size. A SizeSpec is resolved via each mission's
-                plate scale; an int is treated as pixels.
+            size (SizeSpec | None): The requested cutout size, estimated in pixels via each mission's
+                plate scale.
 
         Returns:
             dict[str, bool]: The validation results for the mission parameters by mission name.

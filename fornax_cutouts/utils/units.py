@@ -31,6 +31,16 @@ class SizeSpec(BaseModel):
             self.y = self.x
         return self
 
+    def to_cutout_size(self) -> tuple[int, int] | u.Quantity:
+        """Return the size in a form astrocut accepts as ``cutout_size``.
+
+        Angular sizes are passed through as a Quantity so astrocut converts them with each
+        file's own WCS rather than a fixed per-mission plate scale.
+        """
+        if self.units == "px":
+            return (round(self.x), round(self.y))
+        return u.Quantity([self.x, self.y], _UNIT_MAP[self.units])
+
 
 def to_pixels(value: float, units: str, plate_scale_arcsec: float) -> int:
     """Convert a size in the given units to an integer pixel count.
