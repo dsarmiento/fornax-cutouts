@@ -1,6 +1,7 @@
 """Tests for size specs and pixel conversion."""
 
 import pytest
+from astropy import units as u
 
 from fornax_cutouts.utils.units import SizeSpec, size_spec_to_pixels, to_pixels
 
@@ -11,6 +12,14 @@ class TestSizeSpec:
 
     def test_explicit_y_is_kept(self):
         assert SizeSpec(x=100, y=50).y == 50
+
+    def test_pixel_cutout_size_is_int_tuple(self):
+        assert SizeSpec(x=100.4, y=50.6).to_cutout_size() == (100, 51)
+
+    def test_angular_cutout_size_is_quantity(self):
+        size = SizeSpec(x=60, y=30, units="s").to_cutout_size()
+        assert size.unit == u.arcsec
+        assert size.value.tolist() == [60, 30]
 
 
 class TestToPixels:

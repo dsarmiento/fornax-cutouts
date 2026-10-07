@@ -191,12 +191,6 @@ class TestResolveSizePx:
     def test_pixel_sizespec_ignores_plate_scale(self):
         assert cutout_registry.resolve_size_px("fake_source", SizeSpec(x=200, y=100, units="px")) == (200, 100)
 
-    def test_single_int_as_pixels(self):
-        assert cutout_registry.resolve_size_px("fake_source", 128) == (128, 128)
-
-    def test_tuple_passthrough(self):
-        assert cutout_registry.resolve_size_px("fake_source", (200, 100)) == (200, 100)
-
 
 class TestValidateMissionParams:
     def test_sizespec_lt_mission_limit_passes(self):

@@ -300,7 +300,7 @@ class TestSync:
         kwargs = call.kwargs["kwargs"]
         assert kwargs["source_file"] == _SYNC_FILENAME
         assert kwargs["target"] == TargetPosition(_SYNC_RA, _SYNC_DEC)
-        assert kwargs["size"] == (_SYNC_SIZE, _SYNC_SIZE)
+        assert kwargs["size"] == {"x": _SYNC_SIZE, "y": _SYNC_SIZE, "units": "px"}
         assert kwargs["generate_science"] is True
         assert kwargs["generate_preview"] is True
         assert kwargs["mission"] == "sync"
@@ -329,7 +329,7 @@ class TestSync:
         assert kwargs["green"] == _SYNC_GREEN
         assert kwargs["blue"] == _SYNC_BLUE
         assert kwargs["target"] == TargetPosition(_SYNC_RA, _SYNC_DEC)
-        assert kwargs["size"] == (_SYNC_SIZE, _SYNC_SIZE)
+        assert kwargs["size"] == {"x": _SYNC_SIZE, "y": _SYNC_SIZE, "units": "px"}
         assert call.kwargs["priority"] == 0
         assert call.kwargs["task_id"].startswith("sync-color-")
 
@@ -414,10 +414,9 @@ class TestSync:
         )
         assert response.status_code == 200
         kwargs = api.execute_cutout.apply_async.call_args.kwargs["kwargs"]
-        assert kwargs["size"] == (300, 150)
+        assert kwargs["size"] == {"x": 300.0, "y": 150.0, "units": "px"}
 
-    def test_single_cutout_arcsec_units_converted_via_mission(self, api, monkeypatch):
-        monkeypatch.setattr(cutout_registry, "infer_mission", lambda _: "fake_source")
+    def test_single_cutout_forwards_angular_size(self, api):
         response = api.client.get(
             "/api/v0/cutouts/sync/single",
             params={
@@ -430,10 +429,9 @@ class TestSync:
         )
         assert response.status_code == 200
         kwargs = api.execute_cutout.apply_async.call_args.kwargs["kwargs"]
-        assert kwargs["size"] == (100, 100)
+        assert kwargs["size"] == {"x": 55.0, "y": 55.0, "units": "s"}
 
-    def test_color_preview_rectangular_and_arcmin(self, api, monkeypatch):
-        monkeypatch.setattr(cutout_registry, "infer_mission", lambda _: "fake_source")
+    def test_color_preview_forwards_angular_size(self, api):
         response = api.client.get(
             "/api/v0/cutouts/sync/color",
             params={
@@ -448,7 +446,7 @@ class TestSync:
         )
         assert response.status_code == 200
         kwargs = api.execute_color_preview.apply_async.call_args.kwargs["kwargs"]
-        assert kwargs["size"] == (109, 109)
+        assert kwargs["size"] == {"x": 1.0, "y": 1.0, "units": "m"}
 
     def test_single_cutout_strips_local_prefix(self, api, monkeypatch):
         monkeypatch.setattr(CONFIG.storage, "prefix", "/data")
