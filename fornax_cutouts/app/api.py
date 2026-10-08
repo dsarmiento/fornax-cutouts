@@ -8,6 +8,7 @@ from redis.asyncio import Redis, RedisCluster
 from redis.exceptions import ConnectionError as RedisConnectionError
 from vo_models.voresource.types import UTCTimestamp
 
+from fornax_cutouts import __version__
 from fornax_cutouts.app.discovery import discover_sources
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import async_redis_client_factory, setup_index, sync_redis_client_factory
@@ -44,7 +45,7 @@ async def lifespan(app: FastAPI):
 main_app = FastAPI(
     title=f"{CONFIG.service_name} API",
     description="Pluggable backend for async FITS image cutouts. Implements IVOA UWS 1.1 for job management.",
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan,
 )
 

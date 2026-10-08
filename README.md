@@ -50,6 +50,7 @@ Full documentation is available at
 - [Building a Source](https://nasa-fornax.github.io/fornax-cutouts/sources/building-a-source)
 - [Auth Providers Overview](https://nasa-fornax.github.io/fornax-cutouts/auth/overview)
 - [Building an Auth Provider](https://nasa-fornax.github.io/fornax-cutouts/auth/building-a-provider)
+- [Contributing](https://nasa-fornax.github.io/fornax-cutouts/contributing)
 
 ## Use as a library
 
@@ -104,6 +105,8 @@ uv sync --group dev
 pre-commit install
 pre-commit run --all-files
 ```
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) in **pull request titles** (squash merges). That drives [Semantic Versioning](https://semver.org/) and the changelog via [semantic-release](https://github.com/semantic-release/semantic-release). See the [Contributing guide](https://nasa-fornax.github.io/fornax-cutouts/contributing) for types, scopes, and best practices.
 
 ## Architecture
 

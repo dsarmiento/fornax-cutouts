@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (analyze only; no tag, commit, GitHub Release, or PyPI)
+        type: boolean
+        default: true
+      pypi_repository_url:
+        description: Optional PyPI index URL (e.g. https://test.pypi.org/legacy/)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/lint.yml
+
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs:
+      - lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      version: ${{ steps.semantic-release.outputs.version }}
+    steps:
+      - name: Generate release app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install semantic-release
+        run: |
+          npm install --no-save \
+            semantic-release@24.2.9 \
+            @semantic-release/changelog@6.0.3 \
+            @semantic-release/commit-analyzer@13.0.1 \
+            @semantic-release/release-notes-generator@14.0.3 \
+            @semantic-release/git@10.0.1 \
+            @semantic-release/github@11.0.6 \
+            @semantic-release/exec@7.1.0 \
+            conventional-changelog-conventionalcommits@8.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync
+
+      - name: Run semantic-release
+        id: semantic-release
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          npx semantic-release "${args[@]}"
+
+      - name: Upload Python distribution
+        if: inputs.dry_run == false && steps.semantic-release.outputs.version != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-dist
+          path: dist/
+
+  publish-pypi:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      inputs.dry_run == false &&
+      needs.release.outputs.version != '' &&
+      vars.PYPI_PUBLISH == 'true'
+    needs: release
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download Python distribution
+        uses: actions/download-artifact@v8
+        with:
+          name: python-dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@v1.14.2
+        with:
+          packages-dir: dist/
+          repository-url: ${{ inputs.pypi_repository_url }}
