@@ -83,7 +83,7 @@ User-facing changes appear in [CHANGELOG.md](https://github.com/nasa-fornax/forn
 
 ## Code style
 
-- Python 3.10+ with type hints on public APIs and Pydantic models.
+- Python 3.12+ with type hints on public APIs and Pydantic models.
 - [Ruff](https://docs.astral.sh/ruff/) for lint and format (line length 120, double quotes).
 - Match existing patterns in the module you are changing.
 
