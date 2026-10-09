@@ -23,7 +23,7 @@ and REST API exposure automatically.
 
 ## Requirements
 
-- **Python** 3.10, 3.11, 3.12, or 3.13
+- **Python** 3.12+
 - **Redis** 6.x or newer — used as the Celery broker/backend and for UWS job state.
 
 Configure the broker/backend with the following `CUTOUTS__REDIS__*` settings for local development:
@@ -50,6 +50,7 @@ Full documentation is available at
 - [Building a Source](https://nasa-fornax.github.io/fornax-cutouts/sources/building-a-source)
 - [Auth Providers Overview](https://nasa-fornax.github.io/fornax-cutouts/auth/overview)
 - [Building an Auth Provider](https://nasa-fornax.github.io/fornax-cutouts/auth/building-a-provider)
+- [Contributing](https://nasa-fornax.github.io/fornax-cutouts/contributing)
 
 ## Use as a library
 
@@ -100,10 +101,12 @@ Visit `http://localhost:8000/docs` for the interactive API.
 Pre-commit is configured to lint and format all code:
 
 ```bash
-uv sync --group dev
+uv sync
 pre-commit install
 pre-commit run --all-files
 ```
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) in **pull request titles** (squash merges). That drives [Semantic Versioning](https://semver.org/) and the changelog via [semantic-release](https://github.com/semantic-release/semantic-release). See the [Contributing guide](https://nasa-fornax.github.io/fornax-cutouts/contributing) for types, scopes, and best practices.
 
 ## Architecture
 

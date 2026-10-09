@@ -7,7 +7,7 @@ description: Install and run Fornax Cutouts locally
 
 ## Prerequisites
 
-- Python 3.10–3.13
+- Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
 - Redis 6.2+ (for job queue and UWS state)
 - A mission source file (see [Building a Source](sources/building-a-source.md))
