@@ -20,6 +20,7 @@ from vo_models.voresource.types import UTCTimestamp
 from fornax_cutouts.app.celery_app import celery_app, get_pool_size_for_queue, logger, redis_client_factory
 from fornax_cutouts.auth.limits import CutoutLimiter
 from fornax_cutouts.config import CONFIG
+from fornax_cutouts.constants import S3FS_BLOCK_SIZE_BYTES
 from fornax_cutouts.jobs.redis import SyncRedisCutoutJob
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.models.base import TargetPosition
@@ -538,6 +539,14 @@ class CutoutHandler:
         self.size = size
         self.cutout = None
         self.single_outfile = single_outfile
+        self.fsspec_kwargs = (
+            {
+                "anon": True,
+                "default_block_size": S3FS_BLOCK_SIZE_BYTES,
+            }
+            if S3FS_BLOCK_SIZE_BYTES is not None and any("s3://" in str(f) for f in input_files)
+            else None
+        )
 
     @abstractmethod
     def make_cutout(
@@ -590,6 +599,8 @@ class FITSCutoutHandler(CutoutHandler):
             coordinates=self.coordinate,
             cutout_size=self.size,
             single_outfile=self.single_outfile,
+            fsspec_kwargs=self.fsspec_kwargs,
+            allow_empty=True,
         )
 
     def make_cutout(

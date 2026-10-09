@@ -7,7 +7,7 @@ license = { text = "BSD-3-Clause" }
 authors = [{ name = "MAST Developers", email = "archive@stsci.edu" }]
 requires-python = ">=3.12"
 dependencies = [
-    "astrocut>=1.2.0",
+    "astrocut>=1.4.0",
     "celery>=5.5.0",
     "click>=8.3.0",
     "fastapi[standard-no-fastapi-cloud-cli]>=0.115.0",
