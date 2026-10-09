@@ -13,7 +13,7 @@ Thank you for helping improve Fornax Cutouts. This guide covers local developmen
 2. Install dependencies and hooks:
 
 ```bash
-uv sync --group dev
+uv sync
 uv run pre-commit install
 ```
 

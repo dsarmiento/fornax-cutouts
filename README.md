@@ -101,7 +101,7 @@ Visit `http://localhost:8000/docs` for the interactive API.
 Pre-commit is configured to lint and format all code:
 
 ```bash
-uv sync --group dev
+uv sync
 pre-commit install
 pre-commit run --all-files
 ```

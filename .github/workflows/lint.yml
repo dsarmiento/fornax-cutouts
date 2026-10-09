@@ -20,7 +20,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies (dev)
-        run: uv sync --group dev
+        run: uv sync --frozen
 
       - name: Run pre-commit
         run: uv run pre-commit run --all-files
