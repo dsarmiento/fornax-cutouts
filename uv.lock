@@ -323,13 +323,13 @@ wheels = [
 
 [[package]]
 name = "astrocut"
-version = "1.2.0"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asdf" },
     { name = "astropy" },
     { name = "cachetools" },
-    { name = "fsspec", extra = ["http"] },
+    { name = "fsspec", extra = ["http", "s3"] },
     { name = "gwcs" },
     { name = "pillow" },
     { name = "requests" },
@@ -338,9 +338,9 @@ dependencies = [
     { name = "scipy" },
     { name = "spherical-geometry" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/8c/109a55f138a6fe08300c737c3a2594941104f8a9b7f0607c11ce98c1525f/astrocut-1.2.0.tar.gz", hash = "sha256:488011b003ff0bfe7544d85bc24152180563a48cc5d6a654ddffdbe825df08d7", size = 279999, upload-time = "2026-02-04T15:40:56.538Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/b1/c4531c9ddda7f3caab865e3e3e925b516ad3c84293d7242ba6f8e10cf9a7/astrocut-1.4.0.tar.gz", hash = "sha256:192a7418427510f3fdba0e942d9d1bdd1c2fccbeda49aafa1fd883c4b70e1fed", size = 461083, upload-time = "2026-10-07T20:09:09.322Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/41/b4a3a41534d79891ef5078792e2a88993d50af82517540971e6acdb0c8c7/astrocut-1.2.0-py3-none-any.whl", hash = "sha256:168bac2846565847150cd2a93fdb67250da3f9a3f55eecfb05940d29a7480fa6", size = 123852, upload-time = "2026-02-04T15:40:54.746Z" },
+    { url = "https://files.pythonhosted.org/packages/06/8a/7d1941c300aeb4d82010f62d1f36e43baeba7bee94e140a497d77d524788/astrocut-1.4.0-py3-none-any.whl", hash = "sha256:0ff00eb8ef379543654043538739feda6140d3829fdc66185feaaa18a3b5bb9e", size = 152774, upload-time = "2026-10-07T20:09:07.67Z" },
 ]
 
 [[package]]
@@ -887,7 +887,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "astrocut", specifier = ">=1.2.0" },
+    { name = "astrocut", specifier = ">=1.4" },
     { name = "celery", specifier = ">=5.5.0" },
     { name = "click", specifier = ">=8.3.0" },
     { name = "duckdb", specifier = ">=1.4.1" },
@@ -1023,6 +1023,9 @@ wheels = [
 [package.optional-dependencies]
 http = [
     { name = "aiohttp" },
+]
+s3 = [
+    { name = "s3fs" },
 ]
 
 [[package]]
