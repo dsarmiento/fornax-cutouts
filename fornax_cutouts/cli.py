@@ -1,5 +1,6 @@
 import click
 
+from fornax_cutouts import __version__
 from fornax_cutouts.config import CONFIG
 
 _DEFAULT_LOG_LEVEL = CONFIG.log.level
@@ -8,6 +9,7 @@ _CELERY_LOG_LEVEL_DEFAULT = str(_DEFAULT_LOG_LEVEL).upper()
 
 
 @click.group(help="CLI for Fornax Cutouts: launch API or Celery worker.")
+@click.version_option(__version__, "-V", "--version", prog_name="fornax-cutouts")
 def cli():
     pass
 

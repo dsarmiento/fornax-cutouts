@@ -7,9 +7,15 @@ description: fornax-cutouts command-line interface reference
 
 The `fornax-cutouts` command-line interface provides two subcommands for running the service components.
 
+```bash
+fornax-cutouts [GLOBAL OPTIONS] [COMMAND] [OPTIONS]
 ```
-fornax-cutouts [COMMAND] [OPTIONS]
-```
+
+### Global options
+
+| Option            | Description                                  |
+| ----------------- | -------------------------------------------- |
+| `-V`, `--version` | Show the installed package version and exit. |
 
 ---
 
@@ -23,13 +29,13 @@ fornax-cutouts api [OPTIONS]
 
 ### Options
 
-| Option                                                       | Default                   | Description                                                                                                 |
-| ------------------------------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `--host TEXT`                                                | `0.0.0.0`                 | Network interface to bind to. Use `127.0.0.1` to restrict to localhost.                                     |
-| `--port INTEGER`                                             | `8000`                    | TCP port to listen on. Must be between 1 and 65535.                                                         |
-| `-w, --workers INTEGER`                                      | `1`                       | Number of Uvicorn worker processes. Cannot be combined with `--reload`.                                     |
-| `--reload / --no-reload`                                     | `--no-reload`             | Enable auto-reload on code changes. Intended for development only. Mutually exclusive with `--workers > 1`. |
-| `--log-level [critical\|error\|warning\|info\|debug\|trace]` | from `CUTOUTS__LOG__LEVEL` | Uvicorn log verbosity.                                                                                     |
+| Option                                                       | Default                    | Description                                                                                                 |
+| ------------------------------------------------------------ | -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `--host TEXT`                                                | `0.0.0.0`                  | Network interface to bind to. Use `127.0.0.1` to restrict to localhost.                                     |
+| `--port INTEGER`                                             | `8000`                     | TCP port to listen on. Must be between 1 and 65535.                                                         |
+| `-w, --workers INTEGER`                                      | `1`                        | Number of Uvicorn worker processes. Cannot be combined with `--reload`.                                     |
+| `--reload / --no-reload`                                     | `--no-reload`              | Enable auto-reload on code changes. Intended for development only. Mutually exclusive with `--workers > 1`. |
+| `--log-level [critical\|error\|warning\|info\|debug\|trace]` | from `CUTOUTS__LOG__LEVEL` | Uvicorn log verbosity.                                                                                      |
 
 ### Examples
 
@@ -65,13 +71,13 @@ The worker connects to Redis (configured via `CUTOUTS__REDIS__*`) and begins con
 
 ### Options
 
-| Option                                                | Default                   | Description                                                                                                                |
-| ----------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `-n, --name TEXT`                                     | —                         | Unique hostname for this worker instance (e.g. `worker1@hostname`). Useful when running multiple workers on the same host. |
-| `--autoscale MAX,MIN`                                 | —                         | Enable Celery autoscaling. Provide as `MAX,MIN` (e.g. `8,2` to scale between 2 and 8 processes).                           |
-| `-c, --concurrency INTEGER`                           | —                         | Number of concurrent worker processes or threads. Defaults to the number of CPUs when not set.                             |
-| `-Q, --queues TEXT`                                   | `cutouts,high_mem`        | Comma-separated list of queues to consume from.                                                                            |
-| `--log-level [CRITICAL\|ERROR\|WARNING\|INFO\|DEBUG]` | from `CUTOUTS__LOG__LEVEL` | Celery log verbosity.                                                                                                     |
+| Option                                                | Default                    | Description                                                                                                                |
+| ----------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `-n, --name TEXT`                                     | —                          | Unique hostname for this worker instance (e.g. `worker1@hostname`). Useful when running multiple workers on the same host. |
+| `--autoscale MAX,MIN`                                 | —                          | Enable Celery autoscaling. Provide as `MAX,MIN` (e.g. `8,2` to scale between 2 and 8 processes).                           |
+| `-c, --concurrency INTEGER`                           | —                          | Number of concurrent worker processes or threads. Defaults to the number of CPUs when not set.                             |
+| `-Q, --queues TEXT`                                   | `cutouts,high_mem`         | Comma-separated list of queues to consume from.                                                                            |
+| `--log-level [CRITICAL\|ERROR\|WARNING\|INFO\|DEBUG]` | from `CUTOUTS__LOG__LEVEL` | Celery log verbosity.                                                                                                      |
 
 ### Queues
 
