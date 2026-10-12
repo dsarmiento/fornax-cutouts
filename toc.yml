@@ -21,3 +21,5 @@ project:
       file: docs/celery-tasks.md
     - title: Deployment
       file: docs/deployment/index.md
+    - title: Contributing
+      file: docs/contributing.md
