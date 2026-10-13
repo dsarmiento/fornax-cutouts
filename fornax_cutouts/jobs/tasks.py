@@ -20,6 +20,7 @@ from vo_models.voresource.types import UTCTimestamp
 from fornax_cutouts.app.celery_app import celery_app, get_pool_size_for_queue, logger, redis_client_factory
 from fornax_cutouts.auth.limits import CutoutLimiter
 from fornax_cutouts.config import CONFIG
+from fornax_cutouts.constants import S3FS_BLOCK_SIZE_BYTES
 from fornax_cutouts.jobs.redis import SyncRedisCutoutJob
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.models.base import TargetPosition
@@ -538,6 +539,14 @@ class CutoutHandler:
         self.size = size
         self.cutout = None
         self.single_outfile = single_outfile
+        self.fsspec_kwargs = (
+            {
+                "anon": True,
+                "default_block_size": S3FS_BLOCK_SIZE_BYTES,
+            }
+            if S3FS_BLOCK_SIZE_BYTES is not None and any("s3://" in str(f) for f in input_files)
+            else None
+        )
 
     @abstractmethod
     def make_cutout(
@@ -590,6 +599,8 @@ class FITSCutoutHandler(CutoutHandler):
             coordinates=self.coordinate,
             cutout_size=self.size,
             single_outfile=self.single_outfile,
+            fsspec_kwargs=self.fsspec_kwargs,
+            allow_empty=True,
         )
 
     def make_cutout(
@@ -722,6 +733,7 @@ def generate_cutout(  # noqa: C901
     mission: str = "sync_cutout",
     metadata: dict = {},
     job_id: str = "",
+    is_async: bool = True,
 ) -> CutoutResponse:
     """
     Execute a cutout within the specific source file
@@ -741,6 +753,8 @@ def generate_cutout(  # noqa: C901
             Defaults to {}.
         job_id (str, optional): The job ID to generate the cutout for.
             Defaults to "".
+        is_async (bool, optional): Whether the cutout is being generated asynchronously, this is for logging purposes.
+            Defaults to True.
     """
     mission = _resolve_mission(source_file, mission)
     start_time = time.perf_counter()
@@ -836,6 +850,7 @@ def generate_cutout(  # noqa: C901
         f"Job {job_id} cutout generated: mission='{mission}' source='{source_file}' size={size[0]}x{size[1]}px",
         extra={
             "event": "cutout_generated",
+            "mode": "async" if is_async else "sync",
             "job_id": job_id,
             "mission": mission,
             "source_file": source_file,
@@ -1047,8 +1062,8 @@ def execute_cutout(  # noqa: C901
         batch_num (int): Async batch identifier; 0 for non-batched (e.g. sync) tasks.
         increment_id (int): Index within the batch for Redis aggregation.
     """
-    mission = _resolve_mission(source_file, mission)
     is_async = mission not in SYNC_MISSIONS
+    mission = _resolve_mission(source_file, mission)
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
     if isinstance(size, int):
@@ -1073,6 +1088,7 @@ def execute_cutout(  # noqa: C901
             output_dir=output_dir,
             mission=mission,
             metadata=metadata,
+            is_async=is_async,
         )
 
     except astrocut.exceptions.InvalidQueryError:

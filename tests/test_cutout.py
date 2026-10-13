@@ -6,7 +6,7 @@ from unittest import mock
 from fornax_cutouts.jobs.tasks import generate_color_preview, generate_cutout
 from fornax_cutouts.models.base import TargetPosition
 
-CUTOUT_FILE_ASDF = "tests/data/r00342_p_v01002001004008_008m46x76y60_f146_coadd_shrink.asdf"
+CUTOUT_FILE_ASDF = "tests/data/sample_8.464454_-43.850641_100x100.asdf"
 CUTOUT_FILE_FITS = (
     "s3://stpubdata/panstarrs/ps1/public/md10.v3.skycell/md10/083/deep/md10.v3.skycell.083.stk_deep.y.unconv.fits"
 )
@@ -60,7 +60,7 @@ def test_generate_cutout_asdf(tmp_path):
         metadata={"filter": "F146"},
     )
     cutout_stem = Path(CUTOUT_FILE_ASDF).stem
-    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.asdf"
+    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_lite_astrocut.asdf"
     assert response.science == str(expected_path)
     assert response.preview is None
     assert response.size_px == (10, 10)
@@ -83,7 +83,7 @@ def test_generate_preview_asdf(tmp_path):
         generate_science=False,
     )
     cutout_stem = Path(CUTOUT_FILE_ASDF).stem
-    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut_0.jpg"
+    expected_path = tmp_path / f"{cutout_stem}_{cutout_ra:.7f}_{cutout_dec:.7f}_10-x-10_astrocut.jpg"
     assert response.science is None
     assert response.preview == str(expected_path)
     assert response.size_px == (10, 10)
