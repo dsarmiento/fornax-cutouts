@@ -1,6 +1,6 @@
 [project]
 name = "fornax-cutouts"
-version = "0.1.0"
+version = "0.1.1"
 description = "NASA Fornax Cutouts - Pluggable backend for Async FITS cutouts with FastAPI + Celery using the IVOA UWS standard"
 readme = "README.md"
 license = { text = "BSD-3-Clause" }

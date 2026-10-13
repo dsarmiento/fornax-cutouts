@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -847,7 +847,7 @@ wheels = [
 
 [[package]]
 name = "fornax-cutouts"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "astrocut" },
@@ -887,7 +887,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "astrocut", specifier = ">=1.4" },
+    { name = "astrocut", specifier = ">=1.4.0" },
     { name = "celery", specifier = ">=5.5.0" },
     { name = "click", specifier = ">=8.3.0" },
     { name = "duckdb", specifier = ">=1.4.1" },

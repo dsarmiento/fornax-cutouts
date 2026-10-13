@@ -1,3 +1,9 @@
+## [0.1.1](https://github.com/dsarmiento/fornax-cutouts/compare/v0.1.0...v0.1.1) (2026-10-13)
+
+### Performance Improvements
+
+* upgrade astrocut to 1.4.0, add --version/-V to cli ([#38](https://github.com/dsarmiento/fornax-cutouts/issues/38)) ([696675d](https://github.com/dsarmiento/fornax-cutouts/commit/696675dbb972cf1b2c7886f9282ae569d154cc34))
+
 ## 0.1.0 (2026-10-07)
 
 Initial public development snapshot of the Fornax Cutouts framework (commits through [#37](https://github.com/dsarmiento/fornax-cutouts/pull/37)).
