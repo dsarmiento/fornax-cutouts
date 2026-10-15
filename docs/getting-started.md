@@ -7,7 +7,7 @@ description: Install and run Fornax Cutouts locally
 
 ## Prerequisites
 
-- Python 3.10–3.13
+- Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
 - Redis 6.2+ (for job queue and UWS state)
 - A mission source file (see [Building a Source](sources/building-a-source.md))
@@ -62,7 +62,7 @@ The service reads a `.env` file from the working directory automatically:
 CUTOUTS__SOURCE_PATH=/path/to/your/sources
 CUTOUTS__REDIS__HOST=localhost
 CUTOUTS__STORAGE__PREFIX=s3://my-bucket/cutouts
-CUTOUTS__LOG_LEVEL=info
+CUTOUTS__LOG__LEVEL=info
 ```
 
 ---

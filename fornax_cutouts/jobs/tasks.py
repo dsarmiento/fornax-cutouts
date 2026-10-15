@@ -20,10 +20,11 @@ from vo_models.voresource.types import UTCTimestamp
 from fornax_cutouts.app.celery_app import celery_app, get_pool_size_for_queue, logger, redis_client_factory
 from fornax_cutouts.auth.limits import CutoutLimiter
 from fornax_cutouts.config import CONFIG
+from fornax_cutouts.constants import S3FS_BLOCK_SIZE_BYTES
 from fornax_cutouts.jobs.redis import SyncRedisCutoutJob
 from fornax_cutouts.jobs.results import CutoutResults
 from fornax_cutouts.models.base import TargetPosition
-from fornax_cutouts.models.cutouts import ColorFilter, CutoutResponse
+from fornax_cutouts.models.cutouts import CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutLimitExceededError, NoTasksRemainingInJobError
 from fornax_cutouts.utils.santa_resolver import resolve_positions
@@ -544,6 +545,14 @@ class CutoutHandler:
         self.size = size
         self.cutout = None
         self.single_outfile = single_outfile
+        self.fsspec_kwargs = (
+            {
+                "anon": True,
+                "default_block_size": S3FS_BLOCK_SIZE_BYTES,
+            }
+            if S3FS_BLOCK_SIZE_BYTES is not None and any("s3://" in str(f) for f in input_files)
+            else None
+        )
 
     @abstractmethod
     def make_cutout(
@@ -584,19 +593,6 @@ class CutoutHandler:
         pass
 
     @abstractmethod
-    def get_filter(self, i) -> str | None:
-        """
-        Retrieve the filter information for the cutout of the i-th input file.
-
-        Args:
-            i (int): Index of the cutout.
-
-        Returns:
-            str | None: Filter information if available, otherwise None.
-        """
-        pass
-
-    @abstractmethod
     def get_size_px(self) -> tuple[int, int]:
         """Return the (x, y) pixel size of the first cutout, as produced by astrocut."""
         pass
@@ -614,6 +610,8 @@ class FITSCutoutHandler(CutoutHandler):
             coordinates=self.coordinate,
             cutout_size=self.size.to_cutout_size(),
             single_outfile=self.single_outfile,
+            fsspec_kwargs=self.fsspec_kwargs,
+            allow_empty=True,
         )
 
     def make_cutout(
@@ -648,21 +646,6 @@ class FITSCutoutHandler(CutoutHandler):
         if isinstance(img_fname, list):
             img_fname = img_fname[0]
         return img_fname
-
-    def get_filter(self, i) -> str | None:
-        if self.cutout is None:
-            self._make_cutout()
-
-        fits_cutout = self.cutout.fits_cutouts[i]
-        filter = None
-
-        try:
-            cutout_header = fits_cutout["CUTOUT"].header
-            filter = cutout_header["*FILTER*"][0]
-        except KeyError:
-            pass
-
-        return filter
 
     def get_size_px(self) -> tuple[int, int]:
         if self.cutout is None:
@@ -715,19 +698,6 @@ class ASDFCutoutHandler(CutoutHandler):
             minmax_percent=MINMAX_PERCENT,
         )[0]
         return img_fname
-
-    def get_filter(self, i) -> str | None:
-        """Get the filter info from the instrument metadata"""
-        if self.cutout is None:
-            self._make_cutout()
-
-        filter = None
-        try:
-            filter = self.cutout.asdf_cutouts[i]["roman"]["meta"]["instrument"]["optical_element"]
-        except KeyError:
-            pass
-
-        return filter
 
     def get_size_px(self) -> tuple[int, int]:
         if self.cutout is None:
@@ -788,6 +758,7 @@ def generate_cutout(  # noqa: C901
     mission: str = "sync_cutout",
     metadata: dict = {},
     job_id: str = "",
+    is_async: bool = True,
 ) -> CutoutResponse:
     """
     Execute a cutout within the specific source file
@@ -807,6 +778,8 @@ def generate_cutout(  # noqa: C901
             Defaults to {}.
         job_id (str, optional): The job ID to generate the cutout for.
             Defaults to "".
+        is_async (bool, optional): Whether the cutout is being generated asynchronously, this is for logging purposes.
+            Defaults to True.
     """
     mission = _resolve_mission(source_file, mission)
     start_time = time.perf_counter()
@@ -904,6 +877,7 @@ def generate_cutout(  # noqa: C901
         f"Job {job_id} cutout generated: mission='{mission}' source='{source_file}' size={size_px[0]}x{size_px[1]}px",
         extra={
             "event": "cutout_generated",
+            "mode": "async" if is_async else "sync",
             "job_id": job_id,
             "mission": mission,
             "source_file": source_file,
@@ -932,8 +906,6 @@ def generate_cutout(  # noqa: C901
         },
     )
     filter_val = metadata.get("filter")
-    if not filter_val:
-        filter_val = cutout_handler.get_filter(0)
 
     mission_extras = {k: v for k, v in metadata.items() if k != "filter"}
     return CutoutResponse(
@@ -1049,11 +1021,6 @@ def generate_color_preview(
         mission=mission,
         position=target,
         size_px=size_px,
-        filter=ColorFilter(
-            red=cutout_handler.get_filter(0),
-            green=cutout_handler.get_filter(1),
-            blue=cutout_handler.get_filter(2),
-        ),
         preview=img_fname,
     )
 
@@ -1089,7 +1056,7 @@ def execute_color_preview(
     pydantic=True,
     queue="cutouts",
 )
-def execute_cutout(  # noqa: C901
+def execute_cutout(
     self: Task,
     job_id: str,
     source_file: str,
@@ -1124,8 +1091,8 @@ def execute_cutout(  # noqa: C901
         batch_num (int): Async batch identifier; 0 for non-batched (e.g. sync) tasks.
         increment_id (int): Index within the batch for Redis aggregation.
     """
-    mission = _resolve_mission(source_file, mission)
     is_async = mission not in SYNC_MISSIONS
+    mission = _resolve_mission(source_file, mission)
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
 
@@ -1148,6 +1115,7 @@ def execute_cutout(  # noqa: C901
             output_dir=output_dir,
             mission=mission,
             metadata=metadata,
+            is_async=is_async,
         )
 
     except astrocut.exceptions.InvalidQueryError:

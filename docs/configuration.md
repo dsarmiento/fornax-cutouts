@@ -13,12 +13,29 @@ Settings can be provided as environment variables or in a `.env` file in the wor
 
 ## Core Settings
 
-| Environment Variable   | Type     | Default | Required | Description                                                                                                                          |
-| ---------------------- | -------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `CUTOUTS__SOURCE_PATH` | `path`   | —       | **Yes**  | Path to the directory containing mission source `.py` files. All `.py` files under this path are discovered and executed at startup. |
-| `CUTOUTS__LOG_LEVEL`   | `string` | `info`  | No       | Log level for the API and worker. Accepted values: `critical`, `error`, `warning`, `info`, `debug`.                                  |
-| `CUTOUTS__SYNC_TTL`    | `int`    | `3600`  | No       | Time-to-live in seconds for presigned S3 URLs returned by sync cutout endpoints. Default is 1 hour.                                  |
-| `CUTOUTS__ASYNC_TTL`   | `int`    | `604800`| No       | Time-to-live in seconds for async job state in Redis and the reported UWS destruction time. Default is 1 week.                       |
+| Environment Variable              | Type     | Default           | Required | Description                                                                                                                          |
+| --------------------------------- | -------- | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `CUTOUTS__SOURCE_PATH`            | `path`   | —                 | **Yes**  | Path to the directory containing mission source `.py` files. All `.py` files under this path are discovered and executed at startup. |
+| `CUTOUTS__SERVICE_NAME`           | `string` | `Fornax Cutouts`  | No       | Display name for the service. When `CUTOUTS__WORKER__REDIS_PREFIX` is unset, it defaults to this value lowercased with spaces as hyphens (`fornax-cutouts`). |
+| `CUTOUTS__DEPLOYMENT_TYPE`        | `string` | `local`           | No       | Deployment mode: `local` or `aws`.                                                                                                   |
+| `CUTOUTS__DEPLOYMENT_ENVIRONMENT` | `string` | `dev`             | No       | Environment label: `sb`, `dev`, `test`, or `prod`. Exposed on the health endpoint when not in an ops-only deployment.                |
+| `CUTOUTS__NUM_TRUSTED_PROXIES`    | `int`    | `0`               | No       | Number of trusted reverse proxies in front of the API (used for client IP when cutout limiting is enabled). See [Auth overview](auth/overview.md). |
+| `CUTOUTS__SYNC_TTL`               | `int`    | `3600`            | No       | Expiration in seconds for presigned S3 URLs (sync API signing and worker signing when enabled). Default is 1 hour.                   |
+| `CUTOUTS__ASYNC_TTL`              | `int`    | `604800`          | No       | Time-to-live in seconds for async job state in Redis, worker presigned URLs for async missions, and the reported UWS destruction time. Default is 1 week. |
+
+---
+
+## Logging Settings
+
+Nested under `CUTOUTS__LOG__`.
+
+| Environment Variable     | Type     | Default | Description                                                                                    |
+| ------------------------ | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `CUTOUTS__LOG__LEVEL`    | `string` | `info`  | Log level for the API and worker. Values: `critical`, `error`, `warning`, `info`, `debug`.   |
+| `CUTOUTS__LOG__FORMAT`   | `string` | `text`  | Log format: `text` (human-readable) or `json` (structured JSON for log aggregators).           |
+| `CUTOUTS__LOG__NAME`     | `string` | `fornax_cutouts` | Logger name used by the shared logging setup.                                          |
+
+The CLI (`fornax-cutouts api` / `worker`) uses `CUTOUTS__LOG__LEVEL` as the default for `--log-level` when not passed on the command line.
 
 ---
 
@@ -47,6 +64,7 @@ Nested under `CUTOUTS__WORKER__`.
 | `CUTOUTS__WORKER__BATCH_SIZE_PER_WORKER` | `int`    | `5`              | Number of cutout tasks dispatched per worker per batch. Tuning this affects memory usage and throughput.                  |
 | `CUTOUTS__WORKER__PREFETCH_MULTIPLIER`   | `int`    | `1`              | Celery prefetch multiplier. Keep at `1` for memory-intensive workloads.                                                   |
 | `CUTOUTS__WORKER__MAX_TASKS_PER_CHILD`   | `int`    | `50`             | Number of tasks a worker process handles before being recycled. Helps prevent memory leaks in long-running workers.       |
+| `CUTOUTS__WORKER__BATCH_WATCHDOG_TIMEOUT_MINUTES` | `int` | `45` | Minutes after a batch chord is dispatched before a watchdog task runs to recover stuck or incomplete batches. |
 
 ---
 
@@ -54,13 +72,22 @@ Nested under `CUTOUTS__WORKER__`.
 
 Nested under `CUTOUTS__STORAGE__`.
 
-| Environment Variable       | Type     | Default | Description                                                                                                                |
-| -------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `CUTOUTS__STORAGE__PREFIX` | `string` | `/tmp`  | Root path for storing cutout output files. Use a local path for development or an `s3://bucket/prefix` URI for production. |
+| Environment Variable                    | Type     | Default | Description                                                                                                                |
+| --------------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `CUTOUTS__STORAGE__PREFIX`              | `string` | `/tmp`  | Root path for storing cutout output files. Use a local path for development or an `s3://bucket/prefix` URI for production. |
+| `CUTOUTS__STORAGE__RETURN_SIGNED_URLS`  | `bool`   | `false` | When `true` and storage is S3-backed, workers replace `s3://` result paths with presigned HTTPS URLs before writing job results. Sync endpoints still sign any remaining `s3://` paths in the API layer. TTL uses `CUTOUTS__SYNC_TTL` for sync missions and `CUTOUTS__ASYNC_TTL` otherwise. |
 
 :::{tip} S3 Storage
 When `CUTOUTS__STORAGE__PREFIX` starts with `s3://`, the service uses [s3fs](https://filesystem-spec.readthedocs.io/) for all file I/O. Ensure the process has the necessary IAM permissions to write to the target bucket.
+
+For local filesystem storage, sync responses strip the storage prefix from paths so clients receive web-relative paths (for example `/cutouts/sync/...`).
 :::
+
+---
+
+## Cutout limit (auth)
+
+Rate limiting for `POST /cutouts/async` is configured under `CUTOUTS__CUTOUT_LIMIT__*` and is **disabled by default**. See [Auth overview](auth/overview.md) for `ENABLED`, `ANON_CUTOUT_LIMIT`, `WINDOW_SECONDS`, and `PRINCIPAL_RESOLVER`.
 
 ---
 
@@ -99,9 +126,14 @@ CUTOUTS__SYNC_TTL=3600
 CUTOUTS__ASYNC_TTL=604800
 
 # Logging
-CUTOUTS__LOG_LEVEL=info
+CUTOUTS__LOG__LEVEL=info
+CUTOUTS__LOG__FORMAT=json
+
+# Storage (presign at worker — optional; sync API signs s3:// paths when false)
+CUTOUTS__STORAGE__RETURN_SIGNED_URLS=false
 
 # Deployment
+CUTOUTS__DEPLOYMENT_TYPE=aws
 CUTOUTS__DEPLOYMENT_ENVIRONMENT=prod
 AWS_S3_REGION=us-east-1
 ```

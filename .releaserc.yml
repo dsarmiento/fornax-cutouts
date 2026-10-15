@@ -1,0 +1,50 @@
+branches:
+  - main
+
+tagFormat: v${version}
+
+plugins:
+  - - "@semantic-release/commit-analyzer"
+    - preset: conventionalcommits
+      releaseRules:
+        - breaking: true
+          release: minor
+        - type: feat
+          release: minor
+        - type: fix
+          release: patch
+        - type: perf
+          release: patch
+        - type: docs
+          release: false
+        - type: chore
+          release: false
+        - type: ci
+          release: false
+        - type: test
+          release: false
+        - type: refactor
+          release: false
+
+  - - "@semantic-release/release-notes-generator"
+    - preset: conventionalcommits
+
+  - - "@semantic-release/changelog"
+    - changelogFile: CHANGELOG.md
+
+  - - "@semantic-release/exec"
+    - verifyReleaseCmd: 'case "${nextRelease.version}" in 0.*) exit 0 ;; *) echo "Refusing to release ${nextRelease.version}: only 0.x versions are allowed until 1.0" >&2; exit 1 ;; esac'
+      prepareCmd: uv version --no-sync ${nextRelease.version} && uv build
+      successCmd: 'if [ -n "$GITHUB_OUTPUT" ]; then echo "version=${nextRelease.version}" >> "$GITHUB_OUTPUT"; echo "tag=v${nextRelease.version}" >> "$GITHUB_OUTPUT"; fi'
+
+  - - "@semantic-release/git"
+    - assets:
+        - pyproject.toml
+        - uv.lock
+        - CHANGELOG.md
+      message: "chore(release): ${nextRelease.version} [skip ci]"
+
+  - - "@semantic-release/github"
+    - assets:
+        - path: dist/*
+          label: Python distribution
