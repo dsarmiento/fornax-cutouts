@@ -13,6 +13,7 @@ from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.tasks import enqueue_task, execute_color_preview, execute_cutout
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
+from fornax_cutouts.utils.units import SizeSpec, SizeUnit
 
 sync_router = APIRouter(prefix="/cutouts", tags=["Sync Cutouts"])
 _s3_fs: AbstractFileSystem | None = None
@@ -89,7 +90,11 @@ class CutoutsSyncHandler:
         filename: Annotated[str, Query(description="Publicly available source URL/S3 URI to generate a cutout for")],
         ra: Annotated[float, Query(description="Central RA coordinate to generate cutout for")],
         dec: Annotated[float, Query(description="Central Dec coordinate to generate cutout for")],
-        size: Annotated[int, Query(description="Width and height of the cutout in pixels")],
+        size: Annotated[float, Query(description="Cutout width; height defaults to this if 'y' is omitted", gt=0)],
+        y: Annotated[float | None, Query(description="Cutout height; defaults to 'size' (square)", gt=0)] = None,
+        units: Annotated[
+            SizeUnit, Query(description="Units for size/y: px (default), s (arcsec), m (arcmin), d (deg)")
+        ] = "px",
         include_preview: Annotated[bool, Query(description="Include a JPEG preview of the cutout")] = True,
         job_id: Annotated[str, Query(description="Job ID to generate the cutout for")] = "",
     ) -> CutoutResponse:
@@ -109,7 +114,7 @@ class CutoutsSyncHandler:
                 "job_id": job_id,
                 "source_file": filename,
                 "target": TargetPosition(ra, dec),
-                "size": size,
+                "size": SizeSpec(x=size, y=y, units=units).model_dump(),
                 "generate_science": True,
                 "generate_preview": include_preview,
                 "output_dir": output_dir,
@@ -136,7 +141,11 @@ class CutoutsSyncHandler:
         blue: Annotated[str, Query(description="Blue channel for a color cutout preview")],
         ra: Annotated[float, Query(description="Central RA coordinate to generate cutout for")],
         dec: Annotated[float, Query(description="Central Dec coordinate to generate cutout for")],
-        size: Annotated[int, Query(description="Width and height of the cutout in pixels")],
+        size: Annotated[float, Query(description="Cutout width; height defaults to this if 'y' is omitted", gt=0)],
+        y: Annotated[float | None, Query(description="Cutout height; defaults to 'size' (square)", gt=0)] = None,
+        units: Annotated[
+            SizeUnit, Query(description="Units for size/y: px (default), s (arcsec), m (arcmin), d (deg)")
+        ] = "px",
         job_id: Annotated[str, Query(description="Job ID to generate the cutout for")] = "",
     ) -> CutoutResponse:
         """
@@ -155,7 +164,7 @@ class CutoutsSyncHandler:
                 "green": green,
                 "blue": blue,
                 "target": TargetPosition(ra, dec),
-                "size": size,
+                "size": SizeSpec(x=size, y=y, units=units).model_dump(),
                 "output_dir": output_dir,
             },
             task_id=f"sync-color-{job_id}-{task_uid}",

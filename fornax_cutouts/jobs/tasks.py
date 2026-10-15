@@ -28,6 +28,7 @@ from fornax_cutouts.models.cutouts import CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutLimitExceededError, NoTasksRemainingInJobError
 from fornax_cutouts.utils.santa_resolver import resolve_positions
+from fornax_cutouts.utils.units import SizeSpec
 
 STRETCH = "asinh"  # "sinh"
 MINMAX_PERCENT: list[float] = [0.5, 99.5]
@@ -95,7 +96,11 @@ def schedule_job(
 
     r.queue_job()
     job_parameters = r.get_job_parameters()
-    size = job_parameters.pop("size")
+    size = SizeSpec(
+        x=job_parameters.pop("size"),
+        y=job_parameters.pop("y", None),
+        units=job_parameters.pop("units", "px"),
+    )
     generate_science = job_parameters.pop("generate_science", True)
     generate_preview = job_parameters.pop("generate_preview", False)
 
@@ -103,12 +108,12 @@ def schedule_job(
     mission_params = {mission: params for mission, params in job_parameters.items() if mission in source_names}
 
     logger.debug(
-        f"Job {job_id} received: missions={list(mission_params.keys())} size={size}",
+        f"Job {job_id} received: missions={list(mission_params.keys())} size={size.model_dump()}",
         extra={
             "event": "job_parameters",
             "job_id": job_id,
             "missions": list(mission_params.keys()),
-            "size": size,
+            "size": size.model_dump(),
             "generate_science": generate_science,
             "generate_preview": generate_preview,
         },
@@ -145,12 +150,13 @@ def schedule_job(
 
         descriptors = []
         for target_fname in target_fnames:
+            cutout_size = SizeSpec(x=target_fname.size) if target_fname.size else size
             for filename_obj in target_fname.filenames:
                 descriptor = {
                     "job_id": job_id,
                     "source_file": filename_obj.filename,
                     "target": [target_fname.target.ra, target_fname.target.dec],  # Convert NamedTuple to list for JSON
-                    "size": target_fname.size or size,
+                    "size": cutout_size.model_dump(),
                     "generate_science": generate_science,
                     "generate_preview": generate_preview,
                     "output_dir": f"{CONFIG.storage.prefix}/cutouts/async/{job_id}/{target_fname.mission}",
@@ -531,7 +537,7 @@ class CutoutHandler:
         self,
         input_files: list[str],
         target: TargetPosition,
-        size: tuple[int, int],
+        size: SizeSpec,
         single_outfile: bool = True,
     ):
         self.input_files = input_files
@@ -586,6 +592,11 @@ class CutoutHandler:
         """
         pass
 
+    @abstractmethod
+    def get_size_px(self) -> tuple[int, int]:
+        """Return the (x, y) pixel size of the first cutout, as produced by astrocut."""
+        pass
+
 
 class FITSCutoutHandler(CutoutHandler):
     """
@@ -597,7 +608,7 @@ class FITSCutoutHandler(CutoutHandler):
         self.cutout = astrocut.FITSCutout(
             input_files=self.input_files,
             coordinates=self.coordinate,
-            cutout_size=self.size,
+            cutout_size=self.size.to_cutout_size(),
             single_outfile=self.single_outfile,
             fsspec_kwargs=self.fsspec_kwargs,
             allow_empty=True,
@@ -636,6 +647,13 @@ class FITSCutoutHandler(CutoutHandler):
             img_fname = img_fname[0]
         return img_fname
 
+    def get_size_px(self) -> tuple[int, int]:
+        if self.cutout is None:
+            self._make_cutout()
+
+        ny, nx = self.cutout.fits_cutouts[0]["CUTOUT"].data.shape
+        return (nx, ny)
+
 
 class ASDFCutoutHandler(CutoutHandler):
     """
@@ -647,7 +665,7 @@ class ASDFCutoutHandler(CutoutHandler):
         self.cutout = astrocut.ASDFCutout(
             input_files=self.input_files,
             coordinates=self.coordinate,
-            cutout_size=self.size,
+            cutout_size=self.size.to_cutout_size(),
         )
 
     def make_cutout(
@@ -680,6 +698,13 @@ class ASDFCutoutHandler(CutoutHandler):
             minmax_percent=MINMAX_PERCENT,
         )[0]
         return img_fname
+
+    def get_size_px(self) -> tuple[int, int]:
+        if self.cutout is None:
+            self._make_cutout()
+
+        ny, nx = self.cutout.asdf_cutouts[0]["roman"]["data"].shape
+        return (nx, ny)
 
 
 def setup_filesystem(output_dir: str) -> AbstractFileSystem:
@@ -726,7 +751,7 @@ def get_cutout_stem(cutout_file: str, extensions: Sequence[str]) -> str:
 def generate_cutout(  # noqa: C901
     source_file: str,
     target: TargetPosition,
-    size: tuple[int, int],
+    size: SizeSpec,
     output_dir: str,
     generate_science: bool = True,
     generate_preview: bool = False,
@@ -741,7 +766,7 @@ def generate_cutout(  # noqa: C901
     Args:
         source_file (str): Source file
         target (TargetPosition): Target to center the cutout around
-        size (tuple[int, int]): Size of the cutout
+        size (SizeSpec): Requested size of the cutout
         output_dir (str): Destination directory.
         generate_science (bool, optional): Set to true to generate science cutout file. Supports FITS and ASDF formats.
             Defaults to True.
@@ -846,8 +871,10 @@ def generate_cutout(  # noqa: C901
         cutout_bytes["preview"] = preview_bytes
         timings_s["preview_write"] = round(jpg_write_time - cutout_write_time, 4)
 
+    size_px = cutout_handler.get_size_px()
+
     logger.info(
-        f"Job {job_id} cutout generated: mission='{mission}' source='{source_file}' size={size[0]}x{size[1]}px",
+        f"Job {job_id} cutout generated: mission='{mission}' source='{source_file}' size={size_px[0]}x{size_px[1]}px",
         extra={
             "event": "cutout_generated",
             "mode": "async" if is_async else "sync",
@@ -858,10 +885,11 @@ def generate_cutout(  # noqa: C901
                 "ra": target.ra,
                 "dec": target.dec,
             },
+            "size": size.model_dump(),
             "size_px": {
-                "x": size[0],
-                "y": size[1],
-                "area": size[0] * size[1],
+                "x": size_px[0],
+                "y": size_px[1],
+                "area": size_px[0] * size_px[1],
             },
             "bytes": cutout_bytes,
             "total_s": timings_s["total"],
@@ -883,7 +911,7 @@ def generate_cutout(  # noqa: C901
     return CutoutResponse(
         mission=mission,
         position=target,
-        size_px=size,
+        size_px=size_px,
         filter=filter_val,
         science=cutout_fname,
         preview=img_fname,
@@ -896,7 +924,7 @@ def generate_color_preview(
     green: str,
     blue: str,
     target: TargetPosition,
-    size: tuple[int, int],
+    size: SizeSpec,
     output_dir: str,
 ) -> CutoutResponse:
     """
@@ -948,8 +976,10 @@ def generate_color_preview(
         img_fname = img_fname.replace(temp_output_dir, output_dir)
         upload_time = time.perf_counter()
 
+    size_px = cutout_handler.get_size_px()
+
     logger.info(
-        f"Color preview generated: mission='{mission}' size={size[0]}x{size[1]}px",
+        f"Color preview generated: mission='{mission}' size={size_px[0]}x{size_px[1]}px",
         extra={
             "event": "color_preview_generated",
             "mission": mission,
@@ -957,10 +987,11 @@ def generate_color_preview(
                 "ra": target.ra,
                 "dec": target.dec,
             },
+            "size": size.model_dump(),
             "size_px": {
-                "x": size[0],
-                "y": size[1],
-                "area": size[0] * size[1],
+                "x": size_px[0],
+                "y": size_px[1],
+                "area": size_px[0] * size_px[1],
             },
             "bytes": {
                 "preview": preview_bytes,
@@ -974,7 +1005,7 @@ def generate_color_preview(
         },
     )
     logger.debug(
-        f"Color preview generated timings: size={size[0]}x{size[1]}px",
+        f"Color preview generated timings: size={size_px[0]}x{size_px[1]}px",
         extra={
             "event": "color_preview_generated_timings",
             "timings_s": {
@@ -989,7 +1020,7 @@ def generate_color_preview(
     return CutoutResponse(
         mission=mission,
         position=target,
-        size_px=size,
+        size_px=size_px,
         preview=img_fname,
     )
 
@@ -1005,13 +1036,11 @@ def execute_color_preview(
     green: str,
     blue: str,
     target: TargetPosition | list[float],
-    size: int | tuple[int, int],
+    size: SizeSpec,
     output_dir: str,
 ) -> CutoutResponse:
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
-    if isinstance(size, int):
-        size = (size, size)
     return generate_color_preview(
         red=red,
         green=green,
@@ -1027,12 +1056,12 @@ def execute_color_preview(
     pydantic=True,
     queue="cutouts",
 )
-def execute_cutout(  # noqa: C901
+def execute_cutout(
     self: Task,
     job_id: str,
     source_file: str,
     target: TargetPosition | list[float],
-    size: int | tuple[int, int],
+    size: SizeSpec,
     generate_science: bool = True,
     generate_preview: bool = False,
     output_dir: str = "",
@@ -1048,7 +1077,7 @@ def execute_cutout(  # noqa: C901
         job_id (str): The job ID to generate the cutout for
         source_file (str): Source file
         target (TargetPosition): Target to center the cutout around
-        size (int | tuple[int, int]): Size of the cutout
+        size (SizeSpec): Requested size of the cutout
         generate_science (bool, optional): Set to true to generate science cutout file. Supports FITS and ASDF formats.
             Defaults to True.
         generate_preview (bool, optional): Set to true to generate jpeg preview file.
@@ -1066,8 +1095,6 @@ def execute_cutout(  # noqa: C901
     mission = _resolve_mission(source_file, mission)
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
-    if isinstance(size, int):
-        size = (size, size)
 
     resp = None
     r: SyncRedisCutoutJob | None = None
@@ -1106,11 +1133,7 @@ def execute_cutout(  # noqa: C901
                     "ra": target.ra,
                     "dec": target.dec,
                 },
-                "size_px": {
-                    "x": size[0],
-                    "y": size[1],
-                    "area": size[0] * size[1],
-                },
+                "size": size.model_dump(),
             },
         )
 
@@ -1123,7 +1146,7 @@ def execute_cutout(  # noqa: C901
                     "job_id": job_id,
                     "source_file": source_file,
                     "target": target,
-                    "size": size,
+                    "size": size.model_dump(),
                     "generate_science": generate_science,
                     "generate_preview": generate_preview,
                     "output_dir": output_dir,
@@ -1141,7 +1164,7 @@ def execute_cutout(  # noqa: C901
                 "mission": mission,
                 "source_file": source_file,
                 "target": target,
-                "size": size,
+                "size": size.model_dump(),
                 "error": e.__repr__(),
                 "error_type": type(e).__name__,
             },
