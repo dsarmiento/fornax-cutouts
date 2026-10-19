@@ -68,7 +68,7 @@ class MetadataHandler:
 
         mission_source = _get_mission_or_404(mission)
         mission_params = _filename_params(fname_request)
-        resolved_positions, _ = resolve_positions(fname_request.position)[0]
+        resolved_positions, _ = resolve_positions(fname_request.position)
 
         total_files = mission_source.get_count(
             position=resolved_positions,

@@ -34,7 +34,7 @@ _SYNC_BLUE = "s3://example/source/blue.fits"
 _OBJECT_NAME = "tadpole galaxy"
 _OBJECT_POS = TargetPosition(123.0, 45.0)
 _POSITIONS = ["10.0, 20.0", "30.0, 40.0", "50.0, 60.0"]
-_SANTA_POSITIONS = ["10.0, 20.0", _OBJECT_NAME, "30.0, 40.0"]
+_MIXED_POSITIONS = ["10.0, 20.0", _OBJECT_NAME, "30.0, 40.0"]
 
 _ASYNC_JOB_FORM = {
     "RUNID": "test-run-id",
@@ -52,8 +52,8 @@ _FORMAT_FORM = {
     "fake_source.filter": ["a", "b"],
 }
 
-_SANTA_COUNT_FORM = {
-    "position": _SANTA_POSITIONS,
+_MIXED_COUNT_FORM = {
+    "position": _MIXED_POSITIONS,
     "fake_source": '{"filter": ["g"], "survey": ["s"], "stack_file": ["data"]}',
 }
 
@@ -238,10 +238,6 @@ def api():
             patch("fornax_cutouts.routes.v1.cutouts.async_uws.schedule_job") as mock_schedule,
             patch("fornax_cutouts.routes.v1.cutouts.sync.execute_cutout") as mock_cutout,
             patch("fornax_cutouts.routes.v1.cutouts.sync.execute_color_preview") as mock_color,
-            patch(
-                "fornax_cutouts.utils.santa_resolver.SantaResolver.resolve_targets",
-                return_value={_OBJECT_NAME: _OBJECT_POS},
-            ) as mock_santa,
             TestClient(main_app) as test_client,
         ):
             mock_cutout.apply_async.return_value = _celery_result(_SINGLE_CUTOUT_RESULT)
@@ -251,7 +247,6 @@ def api():
                 schedule_job=mock_schedule,
                 execute_cutout=mock_cutout,
                 execute_color_preview=mock_color,
-                santa=mock_santa,
                 source=source,
                 redis=sync_redis,
             )
@@ -440,20 +435,18 @@ class TestMetadata:
         assert response.status_code == 404
 
     def test_count_resolves_names(self, api):
-        response = api.client.post("/api/v0/filenames/count", data=_SANTA_COUNT_FORM)
+        response = api.client.post("/api/v0/filenames/count", data=_MIXED_COUNT_FORM)
         assert response.status_code == 200
         assert response.json()["total_files"] == 42
-        api.santa.assert_called_once_with([_OBJECT_NAME])
 
         call = cutout_registry.get_mission("fake_source").count_calls[-1]
-        assert call["position"] == [TargetPosition(10.0, 20.0), _OBJECT_POS, TargetPosition(30.0, 40.0)]
+        assert call["position"] == [TargetPosition(10.0, 20.0), TargetPosition(30.0, 40.0)]
         assert call["filter"] == ["g"]
         assert call["survey"] == ["s"]
         assert call["stack_file"] == ["data"]
 
     def test_count_drops_unresolved_names(self, api):
-        api.santa.return_value = {}
-        response = api.client.post("/api/v0/filenames/count", data=_SANTA_COUNT_FORM)
+        response = api.client.post("/api/v0/filenames/count", data=_MIXED_COUNT_FORM)
         assert response.status_code == 200
         call = cutout_registry.get_mission("fake_source").count_calls[-1]
         assert call["position"] == [TargetPosition(10.0, 20.0), TargetPosition(30.0, 40.0)]
