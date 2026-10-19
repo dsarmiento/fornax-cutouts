@@ -1,10 +1,10 @@
 # Fornax Cutouts
 
-[![Tests](https://github.com/dsarmiento/fornax-cutouts/actions/workflows/test.yml/badge.svg)](https://github.com/dsarmiento/fornax-cutouts/actions/workflows/test.yml)
-[![Documentation](https://github.com/dsarmiento/fornax-cutouts/actions/workflows/github-pages.yml/badge.svg)](https://dsarmiento.github.io/fornax-cutouts/)
+[![Tests](https://github.com/nasa-fornax/fornax-cutouts/actions/workflows/test.yml/badge.svg)](https://github.com/nasa-fornax/fornax-cutouts/actions/workflows/test.yml)
+[![Documentation](https://github.com/nasa-fornax/fornax-cutouts/actions/workflows/github-pages.yml/badge.svg)](https://nasa-fornax.github.io/fornax-cutouts/)
 [![PyPI](https://img.shields.io/pypi/v/fornax-cutouts)](https://pypi.org/project/fornax-cutouts/)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/github/license/dsarmiento/fornax-cutouts)](LICENSE)
+[![License](https://img.shields.io/github/license/nasa-fornax/fornax-cutouts)](LICENSE)
 
 Pluggable backend for async FITS image cutouts with [FastAPI](https://fastapi.tiangolo.com/) +
 [Celery](https://docs.celeryq.dev/) + [Astrocut](https://github.com/spacetelescope/astrocut) using the
