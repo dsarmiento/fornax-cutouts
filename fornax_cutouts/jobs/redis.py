@@ -23,7 +23,10 @@ from fornax_cutouts.auth.registry import _UNKNOWN_CLIENT_BUCKET
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.models.uws import create_job_summary, create_parameters
 from fornax_cutouts.utils.exceptions import CutoutJobNotFoundError, NoTasksRemainingInJobError
+from fornax_cutouts.utils.logging import get_logger
 from fornax_cutouts.utils.pagination import get_pagination_metadata
+
+logger = get_logger()
 
 JOB_SUMMARY_TIME_FIELDS = ["quote", "creation_time", "start_time", "end_time", "destruction"]
 CUTOUT_INDEX_NAME = "cutoutJobsIdx"
@@ -187,7 +190,7 @@ def setup_index(redis_client: SyncRedisClient | SyncRedisCluster):
         return
 
     try:
-        print("Setting up redis indexes")
+        logger.info("Setting up redis indexes")
         redis_client.ft(CUTOUT_INDEX_NAME).create_index(
             fields=[
                 TagField("$.phase", as_name="phase"),

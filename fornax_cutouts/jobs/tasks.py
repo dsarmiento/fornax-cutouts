@@ -27,7 +27,7 @@ from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutLimitExceededError, NoTasksRemainingInJobError
-from fornax_cutouts.utils.santa_resolver import resolve_positions
+from fornax_cutouts.utils.target_resolver import resolve_positions
 
 STRETCH = "asinh"  # "sinh"
 MINMAX_PERCENT: list[float] = [0.5, 99.5]
@@ -135,7 +135,7 @@ def schedule_job(
 
     # Scan the job positions from the Redis list in batches and build the cutout descriptors.
     for positions in r.scan_job_positions():
-        resolved_positions = resolve_positions(positions)
+        resolved_positions, _ = resolve_positions(positions)
 
         target_fnames = cutout_registry.get_target_filenames(
             position=resolved_positions,
@@ -263,7 +263,7 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
     start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
-    pool_size = get_pool_size_for_queue("cutouts")
+    pool_size = max(1, get_pool_size_for_queue("cutouts"))
     batch_size = pool_size * CONFIG.worker.batch_size_per_worker
 
     try:
@@ -1062,7 +1062,7 @@ def execute_cutout(  # noqa: C901
         batch_num (int): Async batch identifier; 0 for non-batched (e.g. sync) tasks.
         increment_id (int): Index within the batch for Redis aggregation.
     """
-    is_async = mission not in SYNC_MISSIONS
+    is_async = batch_num > 0
     mission = _resolve_mission(source_file, mission)
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])

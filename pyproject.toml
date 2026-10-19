@@ -2,10 +2,36 @@
 name = "fornax-cutouts"
 version = "0.1.1"
 description = "NASA Fornax Cutouts - Pluggable backend for Async FITS cutouts with FastAPI + Celery using the IVOA UWS standard"
-readme = "README.md"
-license = { text = "BSD-3-Clause" }
+readme = { file = "README.md", content-type = "text/markdown" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [{ name = "MAST Developers", email = "archive@stsci.edu" }]
 requires-python = ">=3.12"
+keywords = [
+    "astronomy",
+    "cutouts",
+    "astrocut",
+    "fastapi",
+    "celery",
+    "fits",
+    "asdf",
+    "ivoa",
+    "uws",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: Celery",
+    "Framework :: FastAPI",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Typing :: Typed",
+]
 dependencies = [
     "astrocut>=1.4.0",
     "celery>=5.5.0",
@@ -23,6 +49,13 @@ dependencies = [
     "pyarrow>=20.0.0",
     "pandas>=2.3.3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/nasa-fornax/fornax-cutouts"
+Documentation = "https://nasa-fornax.github.io/fornax-cutouts/"
+Repository = "https://github.com/nasa-fornax/fornax-cutouts"
+Issues = "https://github.com/nasa-fornax/fornax-cutouts/issues"
+Changelog = "https://github.com/nasa-fornax/fornax-cutouts/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
