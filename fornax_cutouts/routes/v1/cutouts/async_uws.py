@@ -116,7 +116,7 @@ class CutoutsUWSHandler:
         mission_params = {name: _filename_params(v) for name, v in multimission_request.missions.items()}
         if not mission_params:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="At least one mission must be specified",
             )
         request_params = {

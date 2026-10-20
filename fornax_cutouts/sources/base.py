@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from fnmatch import fnmatch
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from fornax_cutouts.models.base import Positions, TargetPosition
 from fornax_cutouts.models.cutouts import FilenameLookupResponse
@@ -16,8 +16,7 @@ class MissionMetadata(BaseModel):
     filter: list[str]  # Filters need to be instrument specific so maybe don't hardcode a single filter parameter here
     survey: list[str]
 
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
 
 class AbstractMissionSource(ABC):

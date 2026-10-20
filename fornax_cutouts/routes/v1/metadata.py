@@ -11,7 +11,7 @@ from fornax_cutouts.models.metadata import (
 )
 from fornax_cutouts.sources import AbstractMissionSource, cutout_registry
 from fornax_cutouts.utils.form_data import _filename_params, form_parser
-from fornax_cutouts.utils.santa_resolver import resolve_positions
+from fornax_cutouts.utils.target_resolver import resolve_positions
 
 metadata_router = APIRouter(tags=["Metadata"])
 
@@ -68,9 +68,10 @@ class MetadataHandler:
 
         mission_source = _get_mission_or_404(mission)
         mission_params = _filename_params(fname_request)
+        resolved_positions, _ = resolve_positions(fname_request.position)
 
         total_files = mission_source.get_count(
-            position=resolve_positions(fname_request.position),
+            position=resolved_positions,
             **mission_params,
         )
 
@@ -93,7 +94,7 @@ class MetadataHandler:
         position = multimission_request.position
         missions = multimission_request.missions
 
-        resolved_positions = resolve_positions(position)
+        resolved_positions, _ = resolve_positions(position)
         # TODO: Make this portion call get_filenames in parallel once serving more than one mission
         for mission_name, fname_request in missions.items():
             request_dict = _filename_params(fname_request)
@@ -138,7 +139,7 @@ class MetadataHandler:
 
         missions = multimission_request.missions
         position = multimission_request.position
-        resolved_positions = resolve_positions(position)
+        resolved_positions, _ = resolve_positions(position)
         for mission_name, fname_request in missions.items():
             request_dict = _filename_params(fname_request)
 
@@ -173,9 +174,10 @@ class MetadataHandler:
             raise ValueError("'position' cannot be null")
 
         mission_params = _filename_params(fname_request)
+        resolved_positions, _ = resolve_positions(fname_request.position)
 
         fnames = cutout_registry.get_mission(mission).get_filenames(
-            position=resolve_positions(fname_request.position),
+            position=resolved_positions,
             **mission_params,
         )
 
