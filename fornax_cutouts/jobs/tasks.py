@@ -67,6 +67,16 @@ def _resolve_mission(source_file: str, mission: str = "", default: str = "sync")
     return cutout_registry.infer_mission(source_file) or default
 
 
+def _resolve_source_file(source_file: str, mission: str) -> str:
+    """Ask the mission source for the path/URL the worker should open."""
+    if mission in _PLACEHOLDER_MISSIONS:
+        return source_file
+    try:
+        return cutout_registry.get_mission(mission).resolve_source_file(source_file)
+    except ValueError:
+        return source_file
+
+
 @celery_app.task(
     bind=True,
     ignore_result=True,
@@ -803,11 +813,12 @@ def generate_cutout(  # noqa: C901
 
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
+        resolved_source = _resolve_source_file(source_file, mission)
         # Support variations of fits extensions
         if cutout_file.endswith(FITS_SUFFIXES):
             science_format = "fits"
             cutout_handler = FITSCutoutHandler(
-                input_files=[source_file],
+                input_files=[resolved_source],
                 target=target,
                 size=size,
             )
@@ -815,7 +826,7 @@ def generate_cutout(  # noqa: C901
         elif cutout_file.endswith(ASDF_SUFFIXES):
             science_format = "asdf"
             cutout_handler = ASDFCutoutHandler(
-                input_files=[source_file],
+                input_files=[resolved_source],
                 target=target,
                 size=size,
             )

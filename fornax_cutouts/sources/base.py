@@ -66,6 +66,10 @@ class AbstractMissionSource(ABC):
         """Return True if ``source_file`` matches this source's filename patterns."""
         return any(fnmatch(source_file, pattern) for pattern in self.source_file_patterns)
 
+    def resolve_source_file(self, source_file: str) -> str:
+        """Return the path or URL the worker should open for ``source_file``."""
+        return source_file
+
     @abstractmethod
     def get_filenames(
         self,

@@ -89,7 +89,8 @@ class MyMissionSource(AbstractMissionSource):
 - Use `self._cast_list_parameter()` to normalize `filter` and `survey` from either a string or list to a list.
 - When a request omits `filter` or `survey`, the API does not pass them; your `get_filenames()` defaults apply.
 - Return an empty list if no files are found — never raise an exception for missing data.
-- Optional `source_file_patterns` to allow sync cutouts to infer `mission` for logs. The default (no patterns) stays `"sync"` and `color_preview`. Override `matches_source_file()` if globbing behavior needs customization. Async jobs pass mission explicitly and are not inferred.
+- Optional `source_file_patterns` to allow sync cutouts to infer `mission` for logs and source resolution. The default (no patterns) stays `"sync"` and `color_preview`. Override `matches_source_file()` if globbing behavior needs customization. Async jobs pass mission explicitly and are not inferred.
+- Optional: override `resolve_source_file(source_file)` to translate a filename/identifier to the URL or path the worker should open (e.g. minting a short-lived presigned URL right before cutting). By default it returns `source_file` unchanged. Sync cutouts rely on `source_file_patterns` (or `matches_source_file()`) to infer the mission before calling this hook.
 
 ---
 
@@ -235,7 +236,9 @@ def get_filenames(
 
 ---
 
-## Step 5: Custom Validation (Optional)
+## Step 5: Optional Hooks
+
+### Custom Validation
 
 Override `validate_request()` to add mission-specific validation beyond the built-in size and filter checks:
 
@@ -251,6 +254,17 @@ def validate_request(self, size: int, **extras) -> bool:
 
     return is_valid
 ```
+
+### Resolving Source Files at Cutout Time
+
+Override `resolve_source_file()` when `get_filenames()` returns a basename or stable identifier that must be resolved to a readable path or URL (such as a short-lived presigned URL) right before cutting:
+
+```python
+def resolve_source_file(self, source_file: str) -> str:
+    return self._mint_presigned_url(source_file)
+```
+
+For sync cutouts (where `mission` is not passed), set `source_file_patterns` or override `matches_source_file()` so the worker can infer the mission and invoke `resolve_source_file()`.
 
 ---
 
@@ -305,6 +319,7 @@ curl http://localhost:8000/api/v0/cutouts/async/{job_id}/phase
 - [ ] `get_filenames()` handles both `TargetPosition` and `Positions` input
 - [ ] `get_filenames()` returns an empty list (not an exception) when no files are found
 - [ ] Optional: override `get_count()` if counting files is cheaper than returning the full list
+- [ ] Optional: override `resolve_source_file()` if filenames need resolution (e.g. presigned URLs) when the worker opens them
 - [ ] Optional: set `source_file_patterns` so sync cutouts can infer `mission` from the filename
 - [ ] `filter` and `survey` are normalized with `_cast_list_parameter()`
 - [ ] Source appears in `GET /api/v0/missions` after startup

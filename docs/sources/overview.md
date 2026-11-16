@@ -84,7 +84,9 @@ Every source must subclass `AbstractMissionSource` and provide:
 
 `get_count()` has a default implementation that calls `get_filenames()` and sums the filename lists. Override it with a cheaper query (for example `COUNT(*)`) when the UI needs a file count without the full list.
 
-Optional `source_file_patterns` to allow sync cutouts to infer `mission` for logs. The default is no patterns, which leaves mission as `"sync"` and `color_preview`. Override `matches_source_file()` if globbing behavior needs customization. Async jobs pass mission explicitly and are not inferred.
+Optional `source_file_patterns` to allow sync cutouts to infer `mission` for logs and source resolution. The default is no patterns, which leaves mission as `"sync"` and `color_preview`. Override `matches_source_file()` if globbing behavior needs customization. Async jobs pass mission explicitly and are not inferred.
+
+`resolve_source_file(source_file)` defaults to returning `source_file` unchanged. Override it when the worker needs to translate a stored identifier or basename into an openable path or short-lived URL (such as a presigned URL) immediately before creating the cutout.
 
 ```python
 from fornax_cutouts.sources.base import AbstractMissionSource, MissionMetadata

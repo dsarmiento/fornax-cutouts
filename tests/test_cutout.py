@@ -3,8 +3,12 @@
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from fornax_cutouts.jobs.tasks import generate_color_preview, generate_cutout
 from fornax_cutouts.models.base import TargetPosition
+from fornax_cutouts.models.cutouts import FilenameLookupResponse
+from fornax_cutouts.sources import AbstractMissionSource, MissionMetadata, cutout_registry
 
 CUTOUT_FILE_ASDF = "tests/data/sample_8.464454_-43.850641_100x100.asdf"
 CUTOUT_FILE_FITS = (
@@ -138,3 +142,36 @@ def test_generate_color_preview(tmp_path):
     assert response.size_px == (10, 10)
     assert response.position == target
     assert response.mission_extras is None
+
+
+class ResolvingSource(AbstractMissionSource):
+    metadata: MissionMetadata = MissionMetadata(
+        name="resolving_source",
+        pixel_size=0.11,
+        max_cutout_size=100,
+        filter=["f184"],
+        survey=["hltds"],
+    )
+    source_file_patterns: tuple[str, ...] = ("virtual.asdf",)
+
+    def get_filenames(self, position, filter, **kwargs) -> list[FilenameLookupResponse]:
+        return []
+
+    def resolve_source_file(self, source_file: str) -> str:
+        return CUTOUT_FILE_ASDF
+
+
+@pytest.mark.parametrize("mission", ["resolving_source", "sync"])
+def test_generate_cutout_resolves_source_file(tmp_path, monkeypatch, mission):
+    monkeypatch.setitem(cutout_registry._SOURCES, "resolving_source", ResolvingSource())
+
+    response = generate_cutout(
+        source_file="virtual.asdf",
+        target=TargetPosition(ra=8.46340835, dec=-43.8514),
+        size=(10, 10),
+        output_dir=str(tmp_path),
+        mission=mission,
+    )
+
+    assert response.mission == "resolving_source"
+    assert response.science is not None and Path(response.science).exists()
