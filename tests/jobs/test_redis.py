@@ -13,6 +13,7 @@ from fornax_cutouts.jobs.redis import (
     RedisKeys,
     SyncRedisCutoutJob,
     _build_uws_jobs_search_query,
+    _filter_uws_jobs_by_owner_id,
     _filter_uws_jobs_by_phase,
 )
 from tests.jobs.helpers import descriptor
@@ -24,24 +25,33 @@ _POSITIONS = ["10.0, 20.0", "30.0, 40.0"]
 class TestUWSJobPhaseFiltering:
     def test_build_search_query_single_phase(self):
         query = _build_uws_jobs_search_query([ExecutionPhase.QUEUED])
-        assert query == "@phase:{QUEUED} -@phase:{ARCHIVED} "
+        assert query == "@phase:{QUEUED} -@phase:{ARCHIVED} @has_owner:[0 0] "
 
     def test_build_search_query_multiple_phases(self):
         query = _build_uws_jobs_search_query([ExecutionPhase.QUEUED, ExecutionPhase.EXECUTING])
-        assert query == "@phase:{QUEUED | EXECUTING} -@phase:{ARCHIVED} "
+        assert query == "@phase:{QUEUED | EXECUTING} -@phase:{ARCHIVED} @has_owner:[0 0] "
 
     def test_build_search_query_archived_only(self):
         query = _build_uws_jobs_search_query([ExecutionPhase.ARCHIVED])
-        assert query == "@phase:{ARCHIVED} "
+        assert query == "@phase:{ARCHIVED} @has_owner:[0 0] "
 
     def test_build_search_query_without_phase_excludes_archived(self):
         query = _build_uws_jobs_search_query([])
-        assert query == "-@phase:{ARCHIVED} "
+        assert query == "-@phase:{ARCHIVED} @has_owner:[0 0] "
 
     def test_build_search_query_with_after(self):
         after = datetime(2024, 1, 1, tzinfo=UTC)
         query = _build_uws_jobs_search_query([ExecutionPhase.QUEUED], after=after)
-        assert query.endswith(f"@creation_time:[{after.timestamp()} +inf]")
+        assert f"@creation_time:[{after.timestamp()} +inf] " in query
+        assert query.endswith("@has_owner:[0 0] ")
+
+    def test_build_search_query_matches_owner(self):
+        query = _build_uws_jobs_search_query([ExecutionPhase.QUEUED], owner_id="owner-a")
+        assert query.endswith("@owner_id:{owner\\-a} ")
+
+    def test_build_search_query_without_owner_requires_missing_field(self):
+        query = _build_uws_jobs_search_query([ExecutionPhase.QUEUED], owner_id=None)
+        assert query.endswith("@has_owner:[0 0] ")
 
     def test_filter_jobs_by_single_phase(self):
         jobs = [
@@ -58,6 +68,26 @@ class TestUWSJobPhaseFiltering:
         ]
         filtered = _filter_uws_jobs_by_phase(jobs, [])
         assert [job["job_id"] for job in filtered] == ["a"]
+
+
+class TestUWSJobOwnerFiltering:
+    def test_anonymous_sees_unowned_jobs_only(self):
+        jobs = [
+            {"job_id": "anon-a"},
+            {"job_id": "anon-b", "owner_id": None},
+            {"job_id": "owned", "owner_id": "owner-a"},
+        ]
+        filtered = _filter_uws_jobs_by_owner_id(jobs, None)
+        assert [job["job_id"] for job in filtered] == ["anon-a", "anon-b"]
+
+    def test_owner_sees_only_their_jobs(self):
+        jobs = [
+            {"job_id": "anon"},
+            {"job_id": "owned-a", "owner_id": "owner-a"},
+            {"job_id": "owned-b", "owner_id": "owner-b"},
+        ]
+        filtered = _filter_uws_jobs_by_owner_id(jobs, "owner-a")
+        assert [job["job_id"] for job in filtered] == ["owned-a"]
 
 
 class TestAsyncJobTTL:
@@ -95,6 +125,22 @@ class TestSyncRedisCutoutJobLifecycle:
         start_time = sync_redis.json().get(RedisKeys(job_id).uws, "$.start_time")[0]
         job.start_job()
         assert sync_redis.json().get(RedisKeys(job_id).uws, "$.start_time")[0] == start_time
+
+
+class TestSyncRedisCutoutJobOwner:
+    def test_get_job_owner_id_returns_stored_owner(self, sync_redis, job_id):
+        sync_redis.json().set(RedisKeys(job_id).uws, "$.owner_id", "owner-a")
+        job = SyncRedisCutoutJob(redis_client=sync_redis, job_id=job_id)
+        assert job.get_job_owner_id() == "owner-a"
+
+    def test_get_job_owner_id_returns_none_when_unset(self, sync_redis, job_id):
+        job = SyncRedisCutoutJob(redis_client=sync_redis, job_id=job_id)
+        assert job.get_job_owner_id() is None
+
+    def test_get_job_owner_id_returns_none_when_null(self, sync_redis, job_id):
+        sync_redis.json().set(RedisKeys(job_id).uws, "$.owner_id", None)
+        job = SyncRedisCutoutJob(redis_client=sync_redis, job_id=job_id)
+        assert job.get_job_owner_id() is None
 
 
 class TestSyncRedisCutoutJobTTL:

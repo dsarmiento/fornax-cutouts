@@ -18,7 +18,10 @@ from fsspec import AbstractFileSystem, filesystem
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.constants import AWS_S3_REGION
 from fornax_cutouts.models.cutouts import CutoutResponse
+from fornax_cutouts.utils.logging import get_logger
 from fornax_cutouts.utils.pagination import get_pagination_metadata
+
+logger = get_logger()
 
 
 @dataclass
@@ -103,7 +106,7 @@ class CutoutResults:
             curr_results = results_db.limit(size, offset=page * size)
             return curr_results.to_df()
         except duckdb.IOException as e:
-            print(f"Error getting results: {e}")
+            logger.error(f"Error getting results: {e}")
             return pd.DataFrame()
 
     def __get_pagination_metadata(self, page: int, limit: int, base_url: str) -> dict[str, dict[str, Any]]:

@@ -2,7 +2,7 @@ import json
 import logging
 import sys
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fornax_cutouts.config import CONFIG
@@ -53,13 +53,13 @@ class CeleryTaskContextFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            from celery import current_task
+        from celery import current_task
 
+        try:
             request = current_task.request
             record.task_id = request.id
             record.task_name = current_task.name
-        except Exception:
+        except AttributeError:
             pass
         return True
 
@@ -72,7 +72,7 @@ class StructuredJSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
         log_data: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "app": self.app,
             "message": record.getMessage(),

@@ -1,0 +1,65 @@
+name: Question or support
+description: Ask how to use, configure, or integrate Fornax Cutouts
+title: "question: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For setup and extension, start with the docs:
+
+        - https://nasa-fornax.github.io/fornax-cutouts/getting-started
+        - https://nasa-fornax.github.io/fornax-cutouts/configuration
+        - https://nasa-fornax.github.io/fornax-cutouts/sources/building-a-source
+
+        A defect belongs on the bug template. A change you want built belongs on the feature or enhancement template.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What you are trying to do
+      description: Mission, archive, or the integration you are building.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you already tried
+      description: Docs you read, settings you set, and the result.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Fornax Cutouts version
+      placeholder: 0.1.1
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - API / Sync cutouts
+        - API / Async cutouts (UWS)
+        - API / Metadata
+        - Workers / Celery
+        - Job state (Redis)
+        - Sources
+        - Auth / rate limits
+        - CLI
+        - Configuration
+        - Deployment
+        - Other
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: "`CUTOUTS__*` settings only. Redact secrets and private hosts."
+      render: text

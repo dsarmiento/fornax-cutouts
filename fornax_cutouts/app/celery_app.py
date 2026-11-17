@@ -84,10 +84,10 @@ def _register_worker_sigterm_handler():
                 for req in list(celery_worker_state.reserved_requests):
                     try:
                         req.reject(requeue=True)
-                    except Exception as e:
-                        logger.error(f"Failed to reject reserved task during SIGTERM: {e}")
-            except Exception as e:
-                logger.error(f"SIGTERM handler error: {e}")
+                    except Exception:
+                        logger.exception("Failed to reject reserved task during SIGTERM")
+            except Exception:
+                logger.exception("SIGTERM handler error")
         raise SystemExit(0)
 
     signal.signal(signal.SIGTERM, handle_sigterm)

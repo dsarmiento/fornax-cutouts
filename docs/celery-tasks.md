@@ -29,6 +29,8 @@ When a client `POST`s to `/async`, the API creates a UWS job in Redis and immedi
 
 If there are no cutouts to run (zero source filename returns from the source registry), **`schedule_job`** completes the job immediately without starting `batch_cutouts`.
 
+If reconcile finds more cutouts than the identity's budget allows, **`schedule_job`** fails the job with a transient error and does not start `batch_cutouts`. The error summary includes the provider's `anon_limit_hit_info` or `authenticated_limit_hit_info` text when that string is non-empty. See [Auth Providers Overview](auth/overview.md#worker-reconcile-flow).
+
 ---
 
 ## Celery dependency graph

@@ -103,11 +103,11 @@ async def request_log_context(request: Request) -> dict[str, Any]:
             try:
                 form = await request.form()
                 body_params = {}
-                for key in form.keys():
+                for key in form:
                     values = form.getlist(key)
                     serialized = [_serialize_form_item(v) for v in values]
                     body_params[key] = serialized[0] if len(serialized) == 1 else serialized
-            except Exception:
+            except Exception:  # noqa: BLE001, logging must not fail the request
                 body_params = {"_form_parse_error": True}
 
     return {
@@ -186,5 +186,5 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "error_type": type(exc).__name__,
             }
             log_line = f"{request.method} {request.url.path} ({request_block['client_ip']}) {response_time_ms}ms"
-            logger.error(log_line, extra=error_data, exc_info=True)
+            logger.exception(log_line, extra=error_data)
             raise

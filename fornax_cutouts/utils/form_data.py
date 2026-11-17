@@ -1,5 +1,4 @@
 import json
-from typing import Type, TypeVar
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
@@ -7,8 +6,6 @@ from pydantic import BaseModel, ValidationError
 
 from fornax_cutouts.models.metadata import FilenameRequest
 from fornax_cutouts.sources import cutout_registry
-
-T = TypeVar("T", bound=BaseModel)
 
 
 def check_json_string(v):
@@ -25,7 +22,7 @@ def check_json_string(v):
     return v
 
 
-def form_parser(model_type: Type[T]):
+def form_parser[T: BaseModel](model_type: type[T]):
     """Parse form data from a FastAPI request into a Pydantic model.
 
     This function returns a callable that can be used as a dependency in FastAPI endpoints to automatically parse
@@ -44,7 +41,7 @@ def form_parser(model_type: Type[T]):
         form = await request.form()
 
         form_data = {}
-        for key in form.keys():
+        for key in form:
             values = form.getlist(key)
 
             if key in source_names or key == "missions":

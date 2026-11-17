@@ -1,0 +1,73 @@
+name: Enhancement
+description: Improve behavior that already exists
+title: "enhancement: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to improve existing behavior, including performance, defaults, errors, and developer experience. New capabilities belong on the feature template.
+
+        A merged improvement ships as `fix:` or `perf:` (patch) unless it adds user-facing behavior, which ships as `feat:` (minor).
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and did not find this proposed
+          required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior
+      description: What the library does today, and where that shows up (endpoint, setting, source hook, CLI, log line).
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed improvement
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this is worth changing
+      description: Correctness, operability, performance, or how callers have to work around it.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - API / Sync cutouts
+        - API / Async cutouts (UWS)
+        - API / Metadata
+        - Workers / Celery
+        - Job state (Redis)
+        - Sources
+        - Auth / rate limits
+        - CLI
+        - Configuration
+        - Models
+        - Packaging / release
+        - Other
+  - type: checkboxes
+    id: kind
+    attributes:
+      label: Kind of improvement
+      options:
+        - label: Performance
+        - label: Error messages or failure handling
+        - label: Defaults or configuration
+        - label: API ergonomics
+        - label: Developer experience
+        - label: This would change existing behavior for current callers
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contribution
+      options:
+        - label: I can open a pull request for this

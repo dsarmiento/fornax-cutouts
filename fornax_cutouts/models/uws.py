@@ -35,8 +35,8 @@ def create_parameters(**kwargs) -> Parameters | None:
     return create_model("CutoutsDynamicParameters", __base__=Parameters, **fields)()
 
 
-def create_job_summary(job_id: str, parameters: dict = {}, **kwargs) -> JobSummary:
-    job_parameters = create_parameters(**parameters)
+def create_job_summary(job_id: str, parameters: dict | None = None, **kwargs) -> JobSummary:
+    job_parameters = create_parameters(**(parameters or {}))
     JobParameters = type(job_parameters)
 
     return JobSummary[JobParameters](job_id=job_id, parameters=job_parameters, **kwargs)

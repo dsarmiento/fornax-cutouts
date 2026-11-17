@@ -41,6 +41,25 @@ class AuthRegistry:
         self.logger.info(f"Registered {self._provider.name} as the authz provider")
         return cls
 
+    def limit_hit_info(self, is_anonymous: bool) -> str:
+        """
+        Help text sent when a principal hits the cutout limit.
+
+        Uses the registered provider's ``anon_limit_hit_info`` or
+        ``authenticated_limit_hit_info`` when one is registered, otherwise the
+        default on ``AbstractAuthProvider``.
+
+        Args:
+            is_anonymous (bool): Whether the principal is anonymous
+
+        Returns:
+            str: The matching limit help text, or an empty string when that field is unset
+        """
+        provider = self._provider if self._provider is not None else AbstractAuthProvider
+        if is_anonymous:
+            return provider.anon_limit_hit_info
+        return provider.authenticated_limit_hit_info
+
     def _anonymous_principal(self, request: Request) -> Principal:
         """
         Create an anonymous Principal for the request.

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from importlib.resources import files
-from typing import Any, Callable
+from typing import Any
 
 from redis import Redis as SyncRedisClient
 from redis import RedisCluster as SyncRedisCluster
@@ -64,7 +65,13 @@ class CutoutLimiter:
         self._release_script: Callable = redis_client.register_script(_RELEASE_SCRIPT)
         self.logger = get_logger()
 
-    async def reserve(self, principal: Principal, job_id: str, requested: int) -> None:
+    async def reserve(
+        self,
+        principal: Principal,
+        job_id: str,
+        requested: int,
+        limit_hit_info: str = "",
+    ) -> None:
         """
         Reserve `requested` cutouts against the principal's rolling-window budget.
 
@@ -72,6 +79,8 @@ class CutoutLimiter:
             principal (Principal): The principal to reserve cutouts against
             job_id (str): The ID of the job
             requested (int): The number of cutouts to reserve
+            limit_hit_info (str): Help text included when this reservation exceeds the limit.
+                Callers pass the anonymous or authenticated provider text for this principal.
 
         Raises:
             CutoutLimitExceededError: If the cutout limit is exceeded
@@ -108,6 +117,7 @@ class CutoutLimiter:
                 used=int(used),
                 requested=requested,
                 retry_after=retry_after,
+                limit_hit_info=limit_hit_info,
             )
 
     async def release(self, identity: str, job_id: str) -> None:
@@ -122,6 +132,7 @@ class CutoutLimiter:
         actual: int,
         cutout_limit: int | None = None,
         window_seconds: int | None = None,
+        limit_hit_info: str = "",
     ) -> None:
         """
         Update a reservation to the true cutout count once it's known.
@@ -132,6 +143,8 @@ class CutoutLimiter:
             actual (int): The actual number of cutouts
             cutout_limit (int | None): The cutout limit
             window_seconds (int | None): The window seconds
+            limit_hit_info (str): Help text included when reconcile exceeds the limit.
+                Callers pass the anonymous or authenticated provider text for this job.
 
         Raises:
             CutoutLimitExceededError: If the cutout limit is exceeded
@@ -168,6 +181,7 @@ class CutoutLimiter:
                 used=int(used),
                 requested=actual,
                 retry_after=retry_after,
+                limit_hit_info=limit_hit_info,
             )
 
 

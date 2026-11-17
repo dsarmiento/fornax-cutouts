@@ -1,0 +1,61 @@
+name: Documentation
+description: Report a gap, error, or unclear page in the docs
+title: "docs: "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Docs site: https://nasa-fornax.github.io/fornax-cutouts/
+
+        Use a bug report when the software disagrees with the docs and the software is wrong. Use this form when the docs are missing, wrong, or hard to follow.
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and the docs site
+          required: true
+  - type: dropdown
+    id: page
+    attributes:
+      label: Which docs
+      multiple: true
+      options:
+        - Getting started
+        - Configuration
+        - CLI
+        - API reference
+        - Building a source
+        - Auth
+        - Contributing
+        - README
+        - Docstrings
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: Page or path
+      description: "URL or repository path, such as `docs/configuration.md`."
+      placeholder: https://nasa-fornax.github.io/fornax-cutouts/configuration
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested change
+      description: An outline or replacement wording is enough. You do not need finished prose.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contribution
+      options:
+        - label: I can open a pull request for this

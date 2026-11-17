@@ -3,11 +3,11 @@ import gc
 import time
 from abc import abstractmethod
 from collections import defaultdict
-from collections.abc import Callable
-from datetime import timedelta, timezone
+from collections.abc import Callable, Sequence
+from datetime import UTC, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Sequence, cast
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import astrocut
@@ -18,6 +18,7 @@ from vo_models.uws.types import ErrorType
 from vo_models.voresource.types import UTCTimestamp
 
 from fornax_cutouts.app.celery_app import celery_app, get_pool_size_for_queue, logger, redis_client_factory
+from fornax_cutouts.auth import auth_registry
 from fornax_cutouts.auth.limits import CutoutLimiter
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.constants import S3FS_BLOCK_SIZE_BYTES
@@ -27,11 +28,11 @@ from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutLimitExceededError, NoTasksRemainingInJobError
-from fornax_cutouts.utils.santa_resolver import resolve_positions
 from fornax_cutouts.utils.units import SizeSpec
+from fornax_cutouts.utils.target_resolver import resolve_positions
 
-STRETCH = "asinh"  # "sinh"
-MINMAX_PERCENT: list[float] = [0.5, 99.5]
+STRETCH = "linear"  # TODO: Revert back to "asinh" after the scaling parameter is exposed in astrocut
+MINMAX_PERCENT: list[float] = [0.3, 99.7]
 
 SCHEDULE_JOB_TASK_ID_TEMPLATE = "schedule_job-{job_id}"
 BATCH_CUTOUTS_TASK_ID_TEMPLATE = "batch_cutouts-{job_id}-{batch_num}"
@@ -67,6 +68,16 @@ def _resolve_mission(source_file: str, mission: str = "", default: str = "sync")
     return cutout_registry.infer_mission(source_file) or default
 
 
+def _resolve_source_file(source_file: str, mission: str) -> str:
+    """Ask the mission source for the path/URL the worker should open."""
+    if mission in _PLACEHOLDER_MISSIONS:
+        return source_file
+    try:
+        return cutout_registry.get_mission(mission).resolve_source_file(source_file)
+    except ValueError:
+        return source_file
+
+
 @celery_app.task(
     bind=True,
     ignore_result=True,
@@ -92,7 +103,12 @@ def schedule_job(
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
     limiter = CutoutLimiter(redis_client_factory())
     cutout_limit_identity, cutout_limit_max, cutout_limit_window_seconds = r.get_cutout_limit_budget()
-    logger.debug(f"Cutout limit identity: {cutout_limit_identity} limit: {cutout_limit_max}")
+    owner_id = r.get_job_owner_id()
+    limit_hit_info = auth_registry.limit_hit_info(is_anonymous=owner_id is None)
+    logger.debug(
+        f"Cutout limit identity: {owner_id if owner_id else 'anonymous'} ({cutout_limit_identity}) "
+        f"limit: {cutout_limit_max}",
+    )
 
     r.queue_job()
     job_parameters = r.get_job_parameters()
@@ -112,6 +128,7 @@ def schedule_job(
         extra={
             "event": "job_parameters",
             "job_id": job_id,
+            "owner_id": owner_id,
             "missions": list(mission_params.keys()),
             "size": size.model_dump(),
             "generate_science": generate_science,
@@ -140,7 +157,7 @@ def schedule_job(
 
     # Scan the job positions from the Redis list in batches and build the cutout descriptors.
     for positions in r.scan_job_positions():
-        resolved_positions = resolve_positions(positions)
+        resolved_positions, _ = resolve_positions(positions)
 
         target_fnames = cutout_registry.get_target_filenames(
             position=resolved_positions,
@@ -179,13 +196,19 @@ def schedule_job(
             actual=0,
             cutout_limit=cutout_limit_max,
             window_seconds=cutout_limit_window_seconds,
+            limit_hit_info=limit_hit_info,
         )
         r.start_job()
         r.complete_job()
         gc.collect()  # force garbage collection to free up memory
         logger.info(
             f"Job {job_id} completed immediately: no matching source files found",
-            extra={"event": "job_no_cutouts", "job_id": job_id, "missions": list(valid_mission_params.keys())},
+            extra={
+                "event": "job_no_cutouts",
+                "job_id": job_id,
+                "owner_id": owner_id,
+                "missions": list(valid_mission_params.keys()),
+            },
         )
         return
 
@@ -200,6 +223,7 @@ def schedule_job(
             actual=total_jobs,
             cutout_limit=cutout_limit_max,
             window_seconds=cutout_limit_window_seconds,
+            limit_hit_info=limit_hit_info,
         )
     except CutoutLimitExceededError as exc:
         r.fail_job(str(exc), ErrorType.TRANSIENT)
@@ -208,6 +232,7 @@ def schedule_job(
             extra={
                 "event": "job_failed_cutout_limit_reconcile",
                 "job_id": job_id,
+                "owner_id": owner_id,
                 "identity": cutout_limit_identity,
                 "actual": total_jobs,
                 "limit": cutout_limit_max,
@@ -232,6 +257,7 @@ def schedule_job(
         extra={
             "event": "job_scheduled",
             "job_id": job_id,
+            "owner_id": owner_id,
             "total_cutouts": total_jobs,
             "cutouts_per_mission": mission_cutout_counts,
             "total_s": round(batch_cutouts_task_time - start_time, 4),
@@ -242,6 +268,7 @@ def schedule_job(
         extra={
             "event": "job_scheduled_timings",
             "job_id": job_id,
+            "owner_id": owner_id,
             "timings_s": {
                 "redis_update": round(redis_update_time - start_time, 4),
                 "validate_mission_params": round(validate_mission_params_time - redis_update_time, 4),
@@ -268,8 +295,9 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
     """
     start_time = time.perf_counter()
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
+    owner_id = r.get_job_owner_id()
 
-    pool_size = get_pool_size_for_queue("cutouts")
+    pool_size = max(1, get_pool_size_for_queue("cutouts"))
     batch_size = pool_size * CONFIG.worker.batch_size_per_worker
 
     try:
@@ -280,13 +308,14 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
             extra={
                 "event": "job_completed",
                 "job_id": job_id,
+                "owner_id": owner_id,
             },
         )
         return
 
     prepare_batch_time = time.perf_counter()
 
-    eta = UTCTimestamp.now(timezone.utc) + timedelta(minutes=CONFIG.worker.batch_watchdog_timeout_minutes)
+    eta = UTCTimestamp.now(UTC) + timedelta(minutes=CONFIG.worker.batch_watchdog_timeout_minutes)
     batch_watchdog.apply_async(
         kwargs={
             "job_id": job_id,
@@ -312,6 +341,7 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
                 "metadata": desc.get("metadata"),
                 "batch_num": batch_num,
                 "increment_id": increment_id,
+                "owner_id": owner_id,
             },
             task_id=EXECUTE_CUTOUT_TASK_ID_TEMPLATE.format(
                 job_id=job_id, batch_num=batch_num, increment_id=increment_id
@@ -326,6 +356,7 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
         extra={
             "event": "batch_dispatched",
             "job_id": job_id,
+            "owner_id": owner_id,
             "batch_num": batch_num,
             "pool_size": pool_size,
             "batch_size": batch_size,
@@ -338,6 +369,7 @@ def batch_cutouts(self: Task, job_id: str, batch_num: int):
         extra={
             "event": "batch_dispatched_timings",
             "job_id": job_id,
+            "owner_id": owner_id,
             "batch_num": batch_num,
             "timings_s": {
                 "prepare_batch": round(prepare_batch_time - start_time, 4),
@@ -360,11 +392,13 @@ def batch_watchdog(self: Task, job_id: str, batch_num: int, expected_count: int)
     if outstanding <= 0:
         return
 
+    owner_id = r.get_job_owner_id()
     logger.warning(
         f"Job {job_id} watchdog {batch_num}: recovering stalled batch (outstanding={outstanding})",
         extra={
             "event": "batch_watchdog_recover",
             "job_id": job_id,
+            "owner_id": owner_id,
             "batch_num": batch_num,
             "outstanding": outstanding,
             "expected_count": expected_count,
@@ -417,6 +451,7 @@ def write_results(self: Task, job_id: str, batch_num: int):  # noqa: C901
     r = SyncRedisCutoutJob(redis_client=redis_client_factory(), job_id=job_id)
 
     try:
+        owner_id = r.get_job_owner_id()
         results = r.get_batch_results(batch_num)
 
         cutout_results = []
@@ -470,6 +505,7 @@ def write_results(self: Task, job_id: str, batch_num: int):  # noqa: C901
                 extra={
                     "event": "next_batch_not_scheduled",
                     "job_id": job_id,
+                    "owner_id": owner_id,
                     "batch_num": batch_num,
                     "job_status": job_status,
                 },
@@ -494,6 +530,7 @@ def write_results(self: Task, job_id: str, batch_num: int):  # noqa: C901
             extra={
                 "event": "batch_results_written",
                 "job_id": job_id,
+                "owner_id": owner_id,
                 "batch_num": batch_num,
                 "successful_cutouts": len(cutout_results),
                 "failed_in_batch": failed_in_batch,
@@ -512,6 +549,7 @@ def write_results(self: Task, job_id: str, batch_num: int):  # noqa: C901
             extra={
                 "event": "batch_results_written_timings",
                 "job_id": job_id,
+                "owner_id": owner_id,
                 "batch_num": batch_num,
                 "timings_s": {
                     "filter_results": round(filter_results_time - start_time, 4),
@@ -570,7 +608,6 @@ class CutoutHandler:
         Returns:
             str: Filename of the generated cutout.
         """
-        pass
 
     @abstractmethod
     def make_preview(
@@ -590,7 +627,6 @@ class CutoutHandler:
         Returns:
             str: Filename of the generated preview image.
         """
-        pass
 
     @abstractmethod
     def get_size_px(self) -> tuple[int, int]:
@@ -756,8 +792,9 @@ def generate_cutout(  # noqa: C901
     generate_science: bool = True,
     generate_preview: bool = False,
     mission: str = "sync_cutout",
-    metadata: dict = {},
+    metadata: dict | None = None,
     job_id: str = "",
+    owner_id: str | None = None,
     is_async: bool = True,
 ) -> CutoutResponse:
     """
@@ -775,12 +812,13 @@ def generate_cutout(  # noqa: C901
         mission (str, optional): The mission name (e.g., "ps1").
             Defaults to "sync_cutout".
         metadata (dict, optional): Mission-specific metadata dictionary.
-            Defaults to {}.
+            Defaults to None.
         job_id (str, optional): The job ID to generate the cutout for.
             Defaults to "".
         is_async (bool, optional): Whether the cutout is being generated asynchronously, this is for logging purposes.
             Defaults to True.
     """
+    metadata = metadata or {}
     mission = _resolve_mission(source_file, mission)
     start_time = time.perf_counter()
 
@@ -800,11 +838,12 @@ def generate_cutout(  # noqa: C901
 
     with TemporaryDirectory(prefix="fornax-cutouts-") as temp_output_dir:
         astrocut_init_start = time.perf_counter()
+        resolved_source = _resolve_source_file(source_file, mission)
         # Support variations of fits extensions
         if cutout_file.endswith(FITS_SUFFIXES):
             science_format = "fits"
             cutout_handler = FITSCutoutHandler(
-                input_files=[source_file],
+                input_files=[resolved_source],
                 target=target,
                 size=size,
             )
@@ -812,7 +851,7 @@ def generate_cutout(  # noqa: C901
         elif cutout_file.endswith(ASDF_SUFFIXES):
             science_format = "asdf"
             cutout_handler = ASDFCutoutHandler(
-                input_files=[source_file],
+                input_files=[resolved_source],
                 target=target,
                 size=size,
             )
@@ -879,6 +918,7 @@ def generate_cutout(  # noqa: C901
             "event": "cutout_generated",
             "mode": "async" if is_async else "sync",
             "job_id": job_id,
+            "owner_id": owner_id,
             "mission": mission,
             "source_file": source_file,
             "target": {
@@ -901,6 +941,7 @@ def generate_cutout(  # noqa: C901
         extra={
             "event": "cutout_generated_timings",
             "job_id": job_id,
+            "owner_id": owner_id,
             "mission": mission,
             "timings_s": timings_s,
         },
@@ -1066,9 +1107,10 @@ def execute_cutout(
     generate_preview: bool = False,
     output_dir: str = "",
     mission: str = "",
-    metadata: dict = {},
+    metadata: dict | None = None,
     batch_num: int = 0,
     increment_id: int = 0,
+    owner_id: str | None = None,
 ) -> CutoutResponse | None:
     """
     Generate a cutout within the specific source file
@@ -1090,8 +1132,10 @@ def execute_cutout(
             Defaults to None.
         batch_num (int): Async batch identifier; 0 for non-batched (e.g. sync) tasks.
         increment_id (int): Index within the batch for Redis aggregation.
+        owner_id (str | None): Job owner resolved once per batch. Anonymous jobs pass None.
     """
-    is_async = mission not in SYNC_MISSIONS
+    metadata = metadata or {}
+    is_async = batch_num > 0
     mission = _resolve_mission(source_file, mission)
     if isinstance(target, list):
         target = TargetPosition(ra=target[0], dec=target[1])
@@ -1107,6 +1151,7 @@ def execute_cutout(
     try:
         resp = generate_cutout(
             job_id=job_id,
+            owner_id=owner_id,
             source_file=source_file,
             target=target,
             size=size,
@@ -1127,6 +1172,7 @@ def execute_cutout(
             extra={
                 "event": "cutout_skipped",
                 "job_id": job_id,
+                "owner_id": owner_id,
                 "mission": mission,
                 "source_file": source_file,
                 "target": {
@@ -1137,7 +1183,7 @@ def execute_cutout(
             },
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001, record any failure
         if is_async:
             remaining = r.fail_task(
                 batch_num=batch_num,
@@ -1161,6 +1207,7 @@ def execute_cutout(
             extra={
                 "event": "cutout_failed",
                 "job_id": job_id,
+                "owner_id": owner_id,
                 "mission": mission,
                 "source_file": source_file,
                 "target": target,

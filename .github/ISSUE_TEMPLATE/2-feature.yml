@@ -1,0 +1,71 @@
+name: Feature request
+description: Propose a capability the library does not have yet
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a new capability. Improvements to behavior that already exists belong on the enhancement template.
+
+        Fornax Cutouts is a library. Describe the change in terms of the public API, source interface, configuration, or deployment contract.
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and did not find this proposed
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who needs this, and what they cannot do today.
+      placeholder: Archive teams need to ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: API shape, configuration keys, source methods, or job behavior. Note migration impact if existing callers would have to change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds you use now, or other designs you considered.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - API / Sync cutouts
+        - API / Async cutouts (UWS)
+        - API / Metadata
+        - Workers / Celery
+        - Job state (Redis)
+        - Sources
+        - Auth / rate limits
+        - CLI
+        - Configuration
+        - Models
+        - Packaging / release
+        - Other
+  - type: checkboxes
+    id: audience
+    attributes:
+      label: Who benefits
+      options:
+        - label: People embedding the library in a mission or archive service
+        - label: API clients requesting cutouts
+        - label: Operators deploying the API and workers
+        - label: Contributors to this repository
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contribution
+      options:
+        - label: I can open a pull request for this

@@ -3,7 +3,8 @@
 import asyncio
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from xml.etree import ElementTree as ET
@@ -15,12 +16,15 @@ from vo_models.uws.types import ExecutionPhase
 from vo_models.voresource.types import UTCTimestamp
 
 from fornax_cutouts.app.api import main_app
+from fornax_cutouts.auth import auth_registry
 from fornax_cutouts.config import CONFIG
 from fornax_cutouts.jobs.redis import RedisKeys, async_redis_client_factory
 from fornax_cutouts.jobs.results import CutoutResults
+from fornax_cutouts.models.auth import Principal
 from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse, FilenameLookupResponse, FilenameWithMetadata
 from fornax_cutouts.models.metadata import FilenameRequest, MultiMissionCutoutRequest
+from fornax_cutouts.routes.v1.cutouts.async_uws import _owner_id_from_principal
 from fornax_cutouts.sources import AbstractMissionSource, MissionMetadata, cutout_registry
 
 _SYNC_RA = 188.27856215089
@@ -34,7 +38,7 @@ _SYNC_BLUE = "s3://example/source/blue.fits"
 _OBJECT_NAME = "tadpole galaxy"
 _OBJECT_POS = TargetPosition(123.0, 45.0)
 _POSITIONS = ["10.0, 20.0", "30.0, 40.0", "50.0, 60.0"]
-_SANTA_POSITIONS = ["10.0, 20.0", _OBJECT_NAME, "30.0, 40.0"]
+_MIXED_POSITIONS = ["10.0, 20.0", _OBJECT_NAME, "30.0, 40.0"]
 
 _ASYNC_JOB_FORM = {
     "RUNID": "test-run-id",
@@ -52,8 +56,8 @@ _FORMAT_FORM = {
     "fake_source.filter": ["a", "b"],
 }
 
-_SANTA_COUNT_FORM = {
-    "position": _SANTA_POSITIONS,
+_MIXED_COUNT_FORM = {
+    "position": _MIXED_POSITIONS,
     "fake_source": '{"filter": ["g"], "survey": ["s"], "stack_file": ["data"]}',
 }
 
@@ -186,6 +190,24 @@ def _created_job_id(response):
     return response.headers["location"].rstrip("/").split("/")[-1]
 
 
+def _submit_job(client) -> str:
+    response = client.post("/api/v0/cutouts/async", data=_ASYNC_JOB_FORM, follow_redirects=False)
+    assert response.status_code == 303
+    return _created_job_id(response)
+
+
+@contextmanager
+def _as_principal(principal: Principal | None) -> Iterator[None]:
+    async def resolve():
+        return principal
+
+    main_app.dependency_overrides[auth_registry.resolve_principal] = resolve
+    try:
+        yield
+    finally:
+        main_app.dependency_overrides.pop(auth_registry.resolve_principal, None)
+
+
 def _job_uws(redis, job_id):
     return redis.json().get(RedisKeys(job_id).uws)
 
@@ -238,10 +260,6 @@ def api():
             patch("fornax_cutouts.routes.v1.cutouts.async_uws.schedule_job") as mock_schedule,
             patch("fornax_cutouts.routes.v1.cutouts.sync.execute_cutout") as mock_cutout,
             patch("fornax_cutouts.routes.v1.cutouts.sync.execute_color_preview") as mock_color,
-            patch(
-                "fornax_cutouts.utils.santa_resolver.SantaResolver.resolve_targets",
-                return_value={_OBJECT_NAME: _OBJECT_POS},
-            ) as mock_santa,
             TestClient(main_app) as test_client,
         ):
             mock_cutout.apply_async.return_value = _celery_result(_SINGLE_CUTOUT_RESULT)
@@ -251,7 +269,6 @@ def api():
                 schedule_job=mock_schedule,
                 execute_cutout=mock_cutout,
                 execute_color_preview=mock_color,
-                santa=mock_santa,
                 source=source,
                 redis=sync_redis,
             )
@@ -487,20 +504,18 @@ class TestMetadata:
         assert response.status_code == 404
 
     def test_count_resolves_names(self, api):
-        response = api.client.post("/api/v0/filenames/count", data=_SANTA_COUNT_FORM)
+        response = api.client.post("/api/v0/filenames/count", data=_MIXED_COUNT_FORM)
         assert response.status_code == 200
         assert response.json()["total_files"] == 42
-        api.santa.assert_called_once_with([_OBJECT_NAME])
 
         call = cutout_registry.get_mission("fake_source").count_calls[-1]
-        assert call["position"] == [TargetPosition(10.0, 20.0), _OBJECT_POS, TargetPosition(30.0, 40.0)]
+        assert call["position"] == [TargetPosition(10.0, 20.0), TargetPosition(30.0, 40.0)]
         assert call["filter"] == ["g"]
         assert call["survey"] == ["s"]
         assert call["stack_file"] == ["data"]
 
     def test_count_drops_unresolved_names(self, api):
-        api.santa.return_value = {}
-        response = api.client.post("/api/v0/filenames/count", data=_SANTA_COUNT_FORM)
+        response = api.client.post("/api/v0/filenames/count", data=_MIXED_COUNT_FORM)
         assert response.status_code == 200
         call = cutout_registry.get_mission("fake_source").count_calls[-1]
         assert call["position"] == [TargetPosition(10.0, 20.0), TargetPosition(30.0, 40.0)]
@@ -753,6 +768,76 @@ class TestAsyncUWS:
     def test_invalid_form(self, client):
         response = client.post("/api/v0/cutouts/async", data={"RUNID": "x"}, follow_redirects=False)
         assert response.status_code == 422
+
+
+class TestJobOwnership:
+    def test_owner_id_from_principal(self):
+        assert _owner_id_from_principal(None) is None
+        assert _owner_id_from_principal(Principal(identity="anon-ip", is_anonymous=True)) is None
+        assert _owner_id_from_principal(Principal(identity="owner-a")) == "owner-a"
+
+    def test_authenticated_job_stores_owner_id(self, api):
+        with _as_principal(Principal(identity="owner-a")):
+            job_id = _submit_job(api.client)
+            response = api.client.get(f"/api/v0/cutouts/async/{job_id}/owner")
+
+        assert _job_uws(api.redis, job_id)["owner_id"] == "owner-a"
+        assert response.status_code == 200
+        assert response.json() == "owner-a"
+
+    def test_anonymous_job_has_no_owner(self, api):
+        with _as_principal(Principal(identity="anon-ip", is_anonymous=True)):
+            job_id = _submit_job(api.client)
+
+        assert "owner_id" not in _job_uws(api.redis, job_id)
+
+    def test_job_list_is_scoped_to_owner(self, api):
+        with _as_principal(Principal(identity="anon-a", is_anonymous=True)):
+            anon_a = _submit_job(api.client)
+        with _as_principal(Principal(identity="anon-b", is_anonymous=True)):
+            anon_b = _submit_job(api.client)
+        with _as_principal(Principal(identity="owner-a")):
+            owned_a = _submit_job(api.client)
+        with _as_principal(Principal(identity="owner-b")):
+            owned_b = _submit_job(api.client)
+
+        with _as_principal(Principal(identity="anon-a", is_anonymous=True)):
+            response = api.client.get("/api/v0/cutouts/async", params={"last": 100})
+        assert response.status_code == 200
+        assert set(_job_ids_from_list(_xml(response.text))) == {anon_a, anon_b}
+
+        with _as_principal(Principal(identity="owner-a")):
+            response = api.client.get("/api/v0/cutouts/async", params={"last": 100})
+        assert response.status_code == 200
+        assert _job_ids_from_list(_xml(response.text)) == [owned_a]
+
+        with _as_principal(Principal(identity="owner-b")):
+            response = api.client.get("/api/v0/cutouts/async", params={"last": 100})
+        assert response.status_code == 200
+        assert _job_ids_from_list(_xml(response.text)) == [owned_b]
+
+    def test_job_fetch_is_scoped_to_owner(self, api):
+        with _as_principal(Principal(identity="anon-a", is_anonymous=True)):
+            anon_job = _submit_job(api.client)
+        with _as_principal(Principal(identity="owner-a")):
+            owned_a = _submit_job(api.client)
+        with _as_principal(Principal(identity="owner-b")):
+            owned_b = _submit_job(api.client)
+
+        with _as_principal(Principal(identity="anon-a", is_anonymous=True)):
+            assert api.client.get(f"/api/v0/cutouts/async/{anon_job}").status_code == 200
+            assert api.client.get(f"/api/v0/cutouts/async/{owned_a}").status_code == 404
+            assert api.client.get(f"/api/v0/cutouts/async/{owned_b}").status_code == 404
+
+        with _as_principal(Principal(identity="owner-a")):
+            assert api.client.get(f"/api/v0/cutouts/async/{owned_a}").status_code == 200
+            assert api.client.get(f"/api/v0/cutouts/async/{owned_b}").status_code == 404
+            assert api.client.get(f"/api/v0/cutouts/async/{anon_job}").status_code == 404
+
+        with _as_principal(Principal(identity="owner-b")):
+            assert api.client.get(f"/api/v0/cutouts/async/{owned_b}").status_code == 200
+            assert api.client.get(f"/api/v0/cutouts/async/{owned_a}").status_code == 404
+            assert api.client.get(f"/api/v0/cutouts/async/{anon_job}").status_code == 404
 
 
 class TestJobSpecific:

@@ -2,21 +2,46 @@
 name = "fornax-cutouts"
 version = "0.1.1"
 description = "NASA Fornax Cutouts - Pluggable backend for Async FITS cutouts with FastAPI + Celery using the IVOA UWS standard"
-readme = "README.md"
-license = { text = "BSD-3-Clause" }
+readme = { file = "README.md", content-type = "text/markdown" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [{ name = "MAST Developers", email = "archive@stsci.edu" }]
 requires-python = ">=3.12"
+keywords = [
+    "astronomy",
+    "cutouts",
+    "astrocut",
+    "fastapi",
+    "celery",
+    "fits",
+    "asdf",
+    "ivoa",
+    "uws",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: Celery",
+    "Framework :: FastAPI",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Typing :: Typed",
+]
 dependencies = [
     "astrocut>=1.4.0",
     "celery>=5.5.0",
     "click>=8.3.0",
     "fastapi[standard-no-fastapi-cloud-cli]>=0.115.0",
     "fastapi-utils>=0.8.0",
-    "httpx>=0.28.1",
     "pydantic>=2.6,<3",
     "pydantic-settings>=2.11.0",
     "redis>=6.2",
-    "typing-inspect>=0.9.0",
+    "typing-inspect>=0.9.0",                           # required by fastapi-utils
     "uvicorn[standard]>=0.37.0",
     "vo-models>=0.5.0",
     "duckdb>=1.4.1",
@@ -24,13 +49,19 @@ dependencies = [
     "pandas>=2.3.3",
 ]
 
+[project.urls]
+Homepage = "https://github.com/nasa-fornax/fornax-cutouts"
+Documentation = "https://nasa-fornax.github.io/fornax-cutouts/"
+Repository = "https://github.com/nasa-fornax/fornax-cutouts"
+Issues = "https://github.com/nasa-fornax/fornax-cutouts/issues"
+Changelog = "https://github.com/nasa-fornax/fornax-cutouts/blob/main/CHANGELOG.md"
+
 [dependency-groups]
 dev = [
     { include-group = "test" },
-    "isort>=7.0.0",
     "pre-commit>=4.3.0",
     "pyarrow-stubs>=20.0.0.20250928",
-    "ruff>=0.14.1",
+    "ruff>=0.17.4",
 ]
 test = [
     "fakeredis[json]>=2.37.1",

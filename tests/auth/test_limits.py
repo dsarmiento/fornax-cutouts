@@ -78,6 +78,16 @@ class TestReserve:
         assert err.limit == LIMIT
         assert err.used == LIMIT
         assert err.requested == 1
+        assert err.limit_hit_info == ""
+        assert "\n" not in str(err)
+
+    async def test_reserve_includes_limit_hit_info(self, limiter):
+        info = "Authenticate to raise this limit"
+        await limiter.reserve(_principal(), "job-1", LIMIT)
+        with pytest.raises(CutoutLimitExceededError) as exc_info:
+            await limiter.reserve(_principal(), "job-2", 1, limit_hit_info=info)
+        assert exc_info.value.limit_hit_info == info
+        assert str(exc_info.value).endswith(info)
 
     async def test_reserve_retry_after_positive(self, limiter):
         await limiter.reserve(_principal(), "job-1", LIMIT)
@@ -149,6 +159,22 @@ class TestReconcile:
         err = exc_info.value
         assert err.limit == LIMIT
         assert err.used == LIMIT
+        assert err.limit_hit_info == ""
+
+    def test_reconcile_includes_limit_hit_info(self, sync_limiter):
+        info = "Authenticate to raise this limit"
+        sync_limiter.reconcile("test-user", "job-1", actual=LIMIT, cutout_limit=LIMIT, window_seconds=WINDOW)
+        with pytest.raises(CutoutLimitExceededError) as exc_info:
+            sync_limiter.reconcile(
+                "test-user",
+                "job-2",
+                actual=1,
+                cutout_limit=LIMIT,
+                window_seconds=WINDOW,
+                limit_hit_info=info,
+            )
+        assert exc_info.value.limit_hit_info == info
+        assert str(exc_info.value).endswith(info)
 
     def test_reconcile_updates_existing_reservation(self, sync_limiter):
         """reconcile with a lower actual count frees up budget."""

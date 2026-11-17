@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://nasa-fornax.github.io/fornax-cutouts/
+    about: Configuration, sources, auth, CLI, and API guides.
+  - name: Contributing guide
+    url: https://nasa-fornax.github.io/fornax-cutouts/contributing
+    about: Local setup, pull request titles, and release conventions.
+  - name: Security vulnerability
+    url: https://github.com/nasa-fornax/fornax-cutouts/security/advisories/new
+    about: Report a vulnerability privately. Do not open a public issue.

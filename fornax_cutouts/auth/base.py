@@ -16,9 +16,14 @@ class AbstractAuthProvider(ABC):
     a subclass with ``@auth_registry.register_provider`` in a module placed under
     ``CUTOUTS__SOURCE_PATH`` or at ``CUTOUTS__CUTOUT_LIMIT__PRINCIPAL_RESOLVER``; it is
     discovered the same way mission sources are.
+
+    Set ``anon_limit_hit_info`` and ``authenticated_limit_hit_info`` to append a short
+    note when that kind of principal exceeds its cutout limit. An empty string adds nothing.
     """
 
     name: str
+    anon_limit_hit_info: str = ""
+    authenticated_limit_hit_info: str = ""
 
     @property
     def logger(self) -> logging.Logger:

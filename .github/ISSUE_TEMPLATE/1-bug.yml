@@ -1,0 +1,114 @@
+name: Bug report
+description: Something is broken or behaves incorrectly
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Include a way to reproduce it, and leave out tokens, credentials, and private file paths.
+
+        Report security vulnerabilities privately: https://github.com/nasa-fornax/fornax-cutouts/security/advisories/new
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and did not find this reported
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What failed, in one or two sentences.
+      placeholder: Creating a cutout job returns 500 when the target is a name instead of coordinates.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - API / Sync cutouts
+        - API / Async cutouts (UWS)
+        - API / Metadata
+        - Workers / Celery
+        - Job state (Redis)
+        - Sources
+        - Auth / rate limits
+        - CLI
+        - Configuration
+        - Models
+        - Packaging / release
+        - Other
+  - type: input
+    id: version
+    attributes:
+      label: Fornax Cutouts version
+      description: "Output of `uv pip show fornax-cutouts`, or the git commit if you are on a checkout."
+      placeholder: 0.1.1
+    validations:
+      required: true
+  - type: dropdown
+    id: python
+    attributes:
+      label: Python version
+      options:
+        - "3.12"
+        - "3.13"
+        - "3.14"
+        - "3.15"
+        - Other
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is the package installed?
+      options:
+        - PyPI
+        - Git dependency
+        - Editable checkout
+        - Not sure
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: API calls, CLI commands, or a minimal custom source. Say whether this happens on every run.
+      placeholder: |
+        1. Start Redis and `fornax-cutouts api`
+        2. POST /api/v1/... with this body
+        3. Poll the job until it errors
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the HTTP status, UWS phase, or exception type.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: "`CUTOUTS__*` settings only. Redact hosts, bucket names, and secrets if they are private."
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: API and worker logs around the failure.
+      render: shell
+  - type: checkboxes
+    id: extra
+    attributes:
+      label: Additional context
+      options:
+        - label: This worked in an earlier version
+        - label: I can help investigate or open a pull request
