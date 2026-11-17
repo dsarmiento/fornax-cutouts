@@ -7,9 +7,9 @@ import pytest
 
 from fornax_cutouts.jobs.tasks import generate_color_preview, generate_cutout
 from fornax_cutouts.models.base import TargetPosition
-from fornax_cutouts.utils.units import SizeSpec
 from fornax_cutouts.models.cutouts import FilenameLookupResponse
 from fornax_cutouts.sources import AbstractMissionSource, MissionMetadata, cutout_registry
+from fornax_cutouts.utils.units import SizeSpec
 
 CUTOUT_FILE_ASDF = "tests/data/sample_8.464454_-43.850641_100x100.asdf"
 CUTOUT_FILE_FITS = (

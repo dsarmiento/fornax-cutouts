@@ -28,8 +28,8 @@ from fornax_cutouts.models.base import TargetPosition
 from fornax_cutouts.models.cutouts import CutoutResponse
 from fornax_cutouts.sources import cutout_registry
 from fornax_cutouts.utils.exceptions import CutoutLimitExceededError, NoTasksRemainingInJobError
-from fornax_cutouts.utils.units import SizeSpec
 from fornax_cutouts.utils.target_resolver import resolve_positions
+from fornax_cutouts.utils.units import SizeSpec
 
 STRETCH = "linear"  # TODO: Revert back to "asinh" after the scaling parameter is exposed in astrocut
 MINMAX_PERCENT: list[float] = [0.3, 99.7]
@@ -631,7 +631,6 @@ class CutoutHandler:
     @abstractmethod
     def get_size_px(self) -> tuple[int, int]:
         """Return the (x, y) pixel size of the first cutout, as produced by astrocut."""
-        pass
 
 
 class FITSCutoutHandler(CutoutHandler):
