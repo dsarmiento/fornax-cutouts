@@ -738,7 +738,8 @@ class ASDFCutoutHandler(CutoutHandler):
         if self.cutout is None:
             self._make_cutout()
 
-        ny, nx = self.cutout.asdf_cutouts[0]["roman"]["data"].shape
+        # astrocut returns a table of (file, coordinate, cutout) rows; "cutout" is a Cutout2D
+        ny, nx = self.cutout.cutouts[0]["cutout"].shape
         return (nx, ny)
 
 

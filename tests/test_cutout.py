@@ -180,7 +180,7 @@ def test_generate_cutout_resolves_source_file(tmp_path, monkeypatch, mission):
     response = generate_cutout(
         source_file="virtual.asdf",
         target=TargetPosition(ra=8.46340835, dec=-43.8514),
-        size=(10, 10),
+        size=SizeSpec(x=10),
         output_dir=str(tmp_path),
         mission=mission,
     )
